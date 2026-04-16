@@ -32,7 +32,6 @@ import { handleShipping } from './shipping.js';
 import { handleDroppedOff } from './dropped-off.js';
 import { handleWaive } from './waive.js';
 import { handleRefund } from './refund.js';
-import { handleReset } from './reset.js';
 import { handleCheckoutCompleted } from '../webhooks/stripe.js';
 
 const TEST_USER_ID = '1490206350943191052'; // @rhapttv
@@ -814,24 +813,38 @@ async function handleTest(message, args) {
             await postResultsEmbed(testChannel, results, 'Giveaway & Spin');
         }
 
-        // Post reset to #ops — user must react ✅ to confirm
+        // Direct reset — bypass handleReset's confirmation flow
         clearChannelOverrides();
-        const opsChannel = getChannel('OPS');
-        if (opsChannel) {
-            await opsChannel.send('🧪 **Test suite complete.** Confirm `!reset` below to clean up test data.');
+        await testChannel.send('🔄 Resetting test data...');
+
+        const TABLES_TO_CLEAR = [
+            'queue_entries', 'queues', 'battle_entries', 'battles',
+            'duck_race_entries', 'giveaway_entries', 'giveaways',
+            'pull_entries', 'card_listings', 'list_sessions',
+            'livestream_buyers', 'livestream_sessions',
+            'purchases', 'purchase_counts', 'discord_links',
+            'shipping_payments', 'active_coupons',
+        ];
+
+        const cleared = [];
+        for (const table of TABLES_TO_CLEAR) {
+            try {
+                const result = db.prepare(`DELETE FROM ${table}`).run();
+                if (result.changes > 0) cleared.push(`${table}: ${result.changes}`);
+            } catch { /* ok */ }
         }
-        await testChannel.send('⏳ Waiting for `!reset` confirmation in <#' + config.CHANNELS.OPS + '>...');
 
-        // Run reset in #ops with the real user's author ID for the reaction filter
-        const resetMsg = buildTestMessage('!reset', opsChannel || testChannel);
-        resetMsg.author.id = message.author.id;
-        await handleReset(resetMsg);
-
-        // Restore community goals pinned message ID after reset
+        // Reset community goals but preserve the pinned message ID
+        db.prepare('UPDATE community_goals SET cycle = 1, cycle_revenue = 0, lifetime_revenue = 0 WHERE id = 1').run();
         if (savedGoalMessageId) {
             goals.setMessageId.run(savedGoalMessageId);
         }
-        await testChannel.send('✅ Reset complete. Community goals restored.');
+
+        // Reset autoincrement counters
+        try { db.prepare('DELETE FROM sqlite_sequence').run(); } catch { /* ok */ }
+
+        const summary = cleared.length ? cleared.join(', ') : 'All tables already empty';
+        await testChannel.send(`✅ **Reset complete** — ${summary}`);
     } finally {
     }
 }
@@ -861,22 +874,28 @@ async function runTestSuite(flow) {
             allResults.push(...results);
         }
 
-        // For HTTP-triggered runs, auto-confirm reset (no user to react)
+        // Direct reset — same as handleTest
         clearChannelOverrides();
-        await testChannel.send('🔄 Running `!reset` to clean up...');
-        const resetMsg = buildTestMessage('!reset', testChannel);
-        resetMsg.author.id = client.user.id;
-        const resetPromise = handleReset(resetMsg);
-        await delay(1000);
-        if (resetMsg.channel.lastMessage) {
-            try { await resetMsg.channel.lastMessage.react('✅'); } catch { /* ok */ }
-        }
-        await resetPromise;
+        await testChannel.send('🔄 Resetting test data...');
 
-        // Restore community goals pinned message ID
-        if (savedGoalMessageId) {
-            goals.setMessageId.run(savedGoalMessageId);
+        const TABLES_TO_CLEAR = [
+            'queue_entries', 'queues', 'battle_entries', 'battles',
+            'duck_race_entries', 'giveaway_entries', 'giveaways',
+            'pull_entries', 'card_listings', 'list_sessions',
+            'livestream_buyers', 'livestream_sessions',
+            'purchases', 'purchase_counts', 'discord_links',
+            'shipping_payments', 'active_coupons',
+        ];
+
+        for (const table of TABLES_TO_CLEAR) {
+            try { db.prepare(`DELETE FROM ${table}`).run(); } catch { /* ok */ }
         }
+
+        db.prepare('UPDATE community_goals SET cycle = 1, cycle_revenue = 0, lifetime_revenue = 0 WHERE id = 1').run();
+        if (savedGoalMessageId) goals.setMessageId.run(savedGoalMessageId);
+        try { db.prepare('DELETE FROM sqlite_sequence').run(); } catch { /* ok */ }
+
+        await testChannel.send('✅ **Reset complete.**');
     } finally {
         // overrides already cleared
     }
