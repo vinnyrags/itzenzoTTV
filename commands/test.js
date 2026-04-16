@@ -795,6 +795,10 @@ async function handleTest(message, args) {
     // Clear previous test output
     await clearTestChannel(testChannel);
 
+    // Save community goals pinned message ID so !reset doesn't orphan it
+    const savedGoal = goals.get.get();
+    const savedGoalMessageId = savedGoal?.channel_message_id;
+
     // Set channel overrides
     for (const key of OVERRIDE_KEYS) {
         setChannelOverride(key, TEST_CHANNEL_ID);
@@ -820,6 +824,11 @@ async function handleTest(message, args) {
             try { await resetMsg.channel.lastMessage.react('✅'); } catch { /* ok */ }
         }
         await resetPromise;
+
+        // Restore community goals pinned message ID (reset wiped it)
+        if (savedGoalMessageId) {
+            goals.setMessageId.run(savedGoalMessageId);
+        }
     } finally {
         clearChannelOverrides();
     }
@@ -828,6 +837,10 @@ async function handleTest(message, args) {
 async function runTestSuite(flow) {
     const testChannel = getChannel('TEST_SUITE');
     if (!testChannel) throw new Error('Test suite channel not found');
+
+    // Save community goals pinned message ID
+    const savedGoal = goals.get.get();
+    const savedGoalMessageId = savedGoal?.channel_message_id;
 
     for (const key of OVERRIDE_KEYS) {
         setChannelOverride(key, TEST_CHANNEL_ID);
@@ -855,6 +868,11 @@ async function runTestSuite(flow) {
             try { await resetMsg.channel.lastMessage.react('✅'); } catch { /* ok */ }
         }
         await resetPromise;
+
+        // Restore community goals pinned message ID
+        if (savedGoalMessageId) {
+            goals.setMessageId.run(savedGoalMessageId);
+        }
     } finally {
         clearChannelOverrides();
     }
