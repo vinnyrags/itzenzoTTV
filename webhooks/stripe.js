@@ -118,16 +118,22 @@ async function handleCheckoutCompleted(session) {
 
     // Post one consolidated order notification in #order-feed
     if (lineItems.length > 0) {
-        const buyerLabel = discordUserId ? `<@${discordUserId}>` : customerEmail || 'Someone';
+        const hasIdentity = !!discordUserId;
         const itemList = lineItems.map((item) => {
             const name = item.name || 'Unknown Product';
             const qty = item.quantity || 1;
             return `\u2022 **${name}**${qty > 1 ? ` (\u00D7${qty})` : ''}`;
         }).join('\n');
 
+        const description = hasIdentity
+            ? `<@${discordUserId}> just picked up:\n${itemList}`
+            : lineItems.length === 1
+                ? `**${lineItems[0].name || 'Unknown Product'}**${(lineItems[0].quantity || 1) > 1 ? ` (\u00D7${lineItems[0].quantity})` : ''} was purchased`
+                : `New order placed:\n${itemList}`;
+
         await sendEmbed('ORDER_FEED', {
             title: '\uD83D\uDED2 New Order!',
-            description: `${buyerLabel} just picked up:\n${itemList}`,
+            description,
             color: 0xceff00,
             footer: new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }),
         });
