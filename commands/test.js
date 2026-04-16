@@ -427,14 +427,15 @@ async function runCardNightFlow(testChannel) {
         await handleCoupon(msg, ['create', 'TESTCODE', '5.00']);
     }));
 
+    results.push(await step('!coupon TESTCODE (activate)', async () => {
+        await delay(1000); // allow Stripe to index the promo code
+        const msg = buildTestMessage('!coupon TESTCODE', testChannel);
+        await handleCoupon(msg, ['TESTCODE']);
+    }));
+
     results.push(await step('!coupon status', async () => {
         const msg = buildTestMessage('!coupon status', testChannel);
         await handleCoupon(msg, ['status']);
-    }));
-
-    results.push(await step('!coupon TESTCODE (announce)', async () => {
-        const msg = buildTestMessage('!coupon TESTCODE', testChannel);
-        await handleCoupon(msg, ['TESTCODE']);
     }));
 
     results.push(await step('!coupon off', async () => {
@@ -445,6 +446,12 @@ async function runCardNightFlow(testChannel) {
     results.push(await step('!coupon create TESTPCT 10% 3', async () => {
         const msg = buildTestMessage('!coupon create TESTPCT 10% 3', testChannel);
         await handleCoupon(msg, ['create', 'TESTPCT', '10%', '3']);
+    }));
+
+    results.push(await step('!coupon TESTPCT (activate)', async () => {
+        await delay(1000);
+        const msg = buildTestMessage('!coupon TESTPCT', testChannel);
+        await handleCoupon(msg, ['TESTPCT']);
     }));
 
     results.push(await step('!coupon status (percentage)', async () => {

@@ -156,8 +156,8 @@ async function handleActivate(message, code) {
 
     // Verify the promo code exists and is active in Stripe
     try {
-        const stripe = new Stripe(config.STRIPE_SECRET_KEY);
-        const promoCodes = await stripe.promotionCodes.list({ code, limit: 1 });
+        const stripe = new Stripe(config.STRIPE_SECRET_KEY, { apiVersion: '2024-12-18.acacia' });
+        const promoCodes = await stripe.promotionCodes.list({ code, limit: 1, expand: ['data.coupon'] });
 
         if (promoCodes.data.length === 0) {
             return message.reply(`No promotion code \`${code}\` found in Stripe. Create one first with \`!coupon create ${code} <discount>\`.`);
