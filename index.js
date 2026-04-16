@@ -59,8 +59,8 @@ const PREFIX = '!';
 // =========================================================================
 
 client.on('messageCreate', async (message) => {
-    // Ignore bots and DMs
-    if (message.author.bot) return;
+    // Ignore own messages (prevent self-loops) and DMs
+    if (message.author.id === client.user.id) return;
     if (!message.guild) return;
 
     // Only respond to messages with the prefix
