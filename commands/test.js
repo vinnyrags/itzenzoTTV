@@ -530,10 +530,27 @@ async function runCardNightFlow(testChannel) {
     // Wait for race animation
     await delay(3000);
 
+    // --- DUCK RACE (random — no preselect) ---
+    results.push(await step('Inject buyers for random duck race', async () => {
+        const queue = queues.getActiveQueue.get();
+        if (!queue) throw new Error('No active queue after pick race');
+        queues.addEntry.run(queue.id, TEST_USER_ID, TEST_EMAIL, 'TEST Product', 1, `fake_random_${Date.now()}`);
+        for (let i = 0; i < 4; i++) {
+            queues.addEntry.run(queue.id, `random_fake_${i}`, `rfake${i}@test.com`, 'TEST Product', 1, `fake_random_session_${i}`);
+        }
+    }));
+
+    results.push(await step('!duckrace start (random)', async () => {
+        const msg = buildTestMessage('!duckrace start', testChannel);
+        await handleDuckRace(msg, ['start']);
+    }));
+
+    await delay(3000);
+
     // --- DUCK RACE (manual winner) ---
     results.push(await step('Inject buyers for manual duck race', async () => {
         const queue = queues.getActiveQueue.get();
-        if (!queue) throw new Error('No active queue after race');
+        if (!queue) throw new Error('No active queue after random race');
         queues.addEntry.run(queue.id, TEST_USER_ID, TEST_EMAIL, 'TEST Product', 1, `fake_manual_${Date.now()}`);
         for (let i = 0; i < 3; i++) {
             queues.addEntry.run(queue.id, `manual_fake_${i}`, `mfake${i}@test.com`, 'TEST Product', 1, `fake_manual_session_${i}`);
