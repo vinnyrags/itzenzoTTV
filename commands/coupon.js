@@ -174,8 +174,11 @@ async function handleActivate(message, code) {
             ? `${coupon.percent_off}% off`
             : `$${(coupon.amount_off / 100).toFixed(2)} off`;
 
-        // Store in DB
-        coupons.activate.run(code, promo.id, coupon.id, displayDiscount);
+        // Store in DB — atomic INSERT rejects if another coupon is already active
+        const result = coupons.activate.run(code, promo.id, coupon.id, displayDiscount);
+        if (result.changes === 0) {
+            return message.reply('A coupon was activated by someone else just now. Run `!coupon status` to check.');
+        }
 
         // Announce
         await sendEmbed('ANNOUNCEMENTS', {

@@ -340,12 +340,13 @@ async function checkBattlePayment(session, discordUserId) {
     const battle = battles.getActiveBattle.get();
     if (!battle) return;
 
-    // Check if battle is full
-    const entryCount = battles.getEntryCount.get(battle.id).count;
-    if (entryCount >= battle.max_entries) {
-        console.log(`Battle #${battle.id} is full — payment from ${discordUserId || 'unknown'} not added`);
+    // Attempt to add entry — the INSERT subquery atomically checks capacity
+    const odiscordUserId = discordUserId || `unknown-${session.id}`;
+    const result = battles.addEntry.run(battle.id, odiscordUserId, battle.id, battle.id);
 
-        // Alert owner — this person paid but didn't get in, needs a refund
+    if (result.changes === 0) {
+        // Battle is full — entry was rejected by the subquery
+        console.log(`Battle #${battle.id} is full — payment from ${odiscordUserId} not added`);
         const buyerLabel = discordUserId ? `<@${discordUserId}>` : (session.customer_details?.email || 'unknown');
         await sendEmbed('OPS', {
             title: '⚠️ Battle Overfill — Refund Needed',
@@ -354,10 +355,6 @@ async function checkBattlePayment(session, discordUserId) {
         });
         return;
     }
-
-    // Add entry and mark as paid in one step
-    const odiscordUserId = discordUserId || `unknown-${session.id}`;
-    battles.addEntry.run(battle.id, odiscordUserId, battle.id, battle.id);
     battles.confirmPayment.run(session.id, battle.id, odiscordUserId);
 
     const entries = battles.getEntries.all(battle.id);
@@ -388,6 +385,11 @@ async function checkCardSalePayment(session, discordUserId, lineItems = []) {
 
     const listing = cardListings.getById.get(listingId);
     if (!listing || listing.status === 'sold') return;
+
+    // Payment arrived after TTL expired — still honor the sale
+    if (listing.status === 'expired') {
+        console.log(`Card listing #${listingId} was expired but payment arrived — marking as sold`);
+    }
 
     // Pull boxes stay open — record entry with buyer + quantity
     if (listing.status === 'pull') {

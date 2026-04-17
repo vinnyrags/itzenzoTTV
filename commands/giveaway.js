@@ -557,9 +557,11 @@ async function handleGiveawayEntry(interaction, giveawayId, tiktokUsername = nul
         return interaction.reply({ content: 'You need to be verified (Xipe role) to enter giveaways. Head to #verify first!', ephemeral: true });
     }
 
-    // Check for duplicate (indexed DB lookup, not O(n) JS scan)
-    const existing = giveaways.hasEntry.get(giveaway.id, interaction.user.id);
-    if (existing) {
+    // Atomic entry — INSERT OR IGNORE handles duplicates via UNIQUE constraint
+    const result = giveaways.addEntry.run(giveaway.id, interaction.user.id, tiktokUsername || null);
+
+    if (result.changes === 0) {
+        // Already entered (UNIQUE constraint rejected the duplicate)
         const entry = giveaways.getEntryByUser.get(giveaway.id, interaction.user.id);
         const entryCount = giveaways.getEntryCount.get(giveaway.id).count;
         const tiktok = entry?.tiktok_username ? ` as @${entry.tiktok_username}` : '';
@@ -568,9 +570,6 @@ async function handleGiveawayEntry(interaction, giveawayId, tiktokUsername = nul
             ephemeral: true,
         });
     }
-
-    // Add entry
-    giveaways.addEntry.run(giveaway.id, interaction.user.id, tiktokUsername || null);
 
     // Throttle embed updates — first 5, then every 10th
     const entryCount = giveaways.getEntryCount.get(giveaway.id).count;

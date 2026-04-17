@@ -128,8 +128,6 @@ async function queueHistory(message) {
 // Duck race commands
 // =========================================================================
 
-let raceInProgress = false;
-
 async function handleDuckRace(message, args) {
     const subcommand = args[0]?.toLowerCase();
 
@@ -211,17 +209,21 @@ async function pickDuckRace(message, args) {
 }
 
 async function runAnimatedRace(message, pickedWinnerId) {
-    if (raceInProgress) {
-        return message.reply('A duck race is already in progress!');
-    }
-
     const queue = findRaceableQueue();
     if (!queue) {
         return message.reply('No queue found to run a duck race for.');
     }
 
+    // Atomically claim the queue for racing — prevents double-start
+    const claimed = queues.claimForRace.run(queue.id);
+    if (claimed.changes === 0) {
+        return message.reply('A duck race is already in progress!');
+    }
+
     const uniqueBuyers = queues.getUniqueBuyers.all(queue.id);
     if (uniqueBuyers.length < 2) {
+        // Release the claim — revert to closed
+        queues.closeQueue.run(queue.id);
         return message.reply('Need at least 2 ducks for a race!');
     }
 
@@ -229,9 +231,9 @@ async function runAnimatedRace(message, pickedWinnerId) {
     if (pickedWinnerId) {
         const inRoster = uniqueBuyers.some((b) => b.buyer === pickedWinnerId);
         if (!inRoster) {
+            queues.closeQueue.run(queue.id);
             return message.channel.send(`<@${pickedWinnerId}> is not in the duck race roster.`);
         }
-        // Confirm the pick in the channel where the command was run
         await message.channel.send(`🦆 Duck race picked. Starting race in <#${config.CHANNELS.QUEUE}>...`);
     }
 
@@ -239,21 +241,14 @@ async function runAnimatedRace(message, pickedWinnerId) {
     const winnerId = pickedWinnerId
         || uniqueBuyers[Math.floor(Math.random() * uniqueBuyers.length)].buyer;
 
-    raceInProgress = true;
-
     try {
-        // Close queue if still open
-        if (queue.status === 'open') {
-            queues.closeQueue.run(queue.id);
-        }
-
         // Generate race frames
         const frames = generateRaceFrames(uniqueBuyers, winnerId, 5);
 
         // Post initial "starting" embed to #queue
         const queueChannel = getChannel('QUEUE');
         if (!queueChannel) {
-            raceInProgress = false;
+            queues.closeQueue.run(queue.id);
             return message.reply('Cannot find #queue channel.');
         }
 
@@ -276,8 +271,10 @@ async function runAnimatedRace(message, pickedWinnerId) {
 
         // Finalize — assign role, announcements, open next queue
         await finalizeDuckRace(queue.id, winnerId, uniqueBuyers.length, message);
-    } finally {
-        raceInProgress = false;
+    } catch (e) {
+        // On error, revert queue status so it can be retried
+        queues.closeQueue.run(queue.id);
+        throw e;
     }
 }
 

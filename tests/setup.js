@@ -186,7 +186,21 @@ export function createTestDb() {
             created_at TEXT DEFAULT (datetime('now')),
             closed_at TEXT
         );
+
+        CREATE TABLE IF NOT EXISTS active_coupons (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            promo_code TEXT NOT NULL,
+            stripe_promo_id TEXT NOT NULL,
+            stripe_coupon_id TEXT NOT NULL,
+            discount_display TEXT NOT NULL,
+            status TEXT DEFAULT 'active',
+            activated_at TEXT DEFAULT (datetime('now')),
+            deactivated_at TEXT
+        );
     `);
+
+    // Unique indexes for race condition protection
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_shipping_session ON shipping_payments(stripe_session_id) WHERE stripe_session_id IS NOT NULL`);
 
     return db;
 }
@@ -230,6 +244,7 @@ export function buildStmts(db) {
             getActiveQueue: db.prepare(`SELECT * FROM queues WHERE status = 'open' ORDER BY created_at DESC LIMIT 1`),
             getQueueById: db.prepare(`SELECT * FROM queues WHERE id = ?`),
             closeQueue: db.prepare(`UPDATE queues SET status = 'closed', closed_at = datetime('now') WHERE id = ?`),
+            claimForRace: db.prepare(`UPDATE queues SET status = 'racing' WHERE id = ? AND status IN ('open', 'closed')`),
             setDuckRaceWinner: db.prepare(`UPDATE queues SET status = 'complete', duck_race_winner_id = ? WHERE id = ?`),
             addEntry: db.prepare(`INSERT INTO queue_entries (queue_id, discord_user_id, customer_email, product_name, quantity, stripe_session_id) VALUES (?, ?, ?, ?, ?, ?)`),
             getEntries: db.prepare(`SELECT * FROM queue_entries WHERE queue_id = ? ORDER BY created_at ASC`),
@@ -293,7 +308,7 @@ export function buildStmts(db) {
             getExpired: db.prepare(`SELECT * FROM giveaways WHERE status = 'open' AND ends_at IS NOT NULL AND ends_at <= datetime('now')`),
         },
         shipping: {
-            record: db.prepare(`INSERT INTO shipping_payments (customer_email, discord_user_id, amount, source, stripe_session_id) VALUES (?, ?, ?, ?, ?)`),
+            record: db.prepare(`INSERT OR IGNORE INTO shipping_payments (customer_email, discord_user_id, amount, source, stripe_session_id) VALUES (?, ?, ?, ?, ?)`),
             hasShippingThisWeek: db.prepare(`SELECT 1 FROM shipping_payments WHERE customer_email = ? AND created_at >= datetime('now', 'weekday 1', '-7 days') LIMIT 1`),
             hasShippingThisMonth: db.prepare(`SELECT 1 FROM shipping_payments WHERE customer_email = ? AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now') LIMIT 1`),
             getByEmailThisWeek: db.prepare(`SELECT * FROM shipping_payments WHERE customer_email = ? AND created_at >= datetime('now', 'weekday 1', '-7 days') ORDER BY created_at DESC LIMIT 1`),

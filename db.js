@@ -269,6 +269,9 @@ try {
     // Column already exists — ignore
 }
 
+// Unique index on shipping payments per session (v10 — prevent webhook retry duplicates)
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_shipping_session ON shipping_payments(stripe_session_id) WHERE stripe_session_id IS NOT NULL`);
+
 // Add social giveaway fields (v8)
 try { db.exec(`ALTER TABLE giveaways ADD COLUMN is_social INTEGER DEFAULT 0`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE giveaways ADD COLUMN social_link TEXT`); } catch { /* exists */ }
@@ -440,6 +443,10 @@ const queueStmts = {
         UPDATE queues SET status = 'closed', closed_at = datetime('now') WHERE id = ?
     `),
 
+    claimForRace: db.prepare(`
+        UPDATE queues SET status = 'racing' WHERE id = ? AND status IN ('open', 'closed')
+    `),
+
     setDuckRaceWinner: db.prepare(`
         UPDATE queues SET status = 'complete', duck_race_winner_id = ? WHERE id = ?
     `),
@@ -515,7 +522,7 @@ const livestreamStmts = {
 
 const shippingStmts = {
     record: db.prepare(`
-        INSERT INTO shipping_payments (customer_email, discord_user_id, amount, source, stripe_session_id)
+        INSERT OR IGNORE INTO shipping_payments (customer_email, discord_user_id, amount, source, stripe_session_id)
         VALUES (?, ?, ?, ?, ?)
     `),
 
@@ -781,7 +788,8 @@ const listSessionStmts = {
 const couponStmts = {
     activate: db.prepare(`
         INSERT INTO active_coupons (promo_code, stripe_promo_id, stripe_coupon_id, discount_display)
-        VALUES (?, ?, ?, ?)
+        SELECT ?, ?, ?, ?
+        WHERE NOT EXISTS (SELECT 1 FROM active_coupons WHERE status = 'active')
     `),
 
     getActive: db.prepare(`
