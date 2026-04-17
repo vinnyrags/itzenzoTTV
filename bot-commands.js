@@ -283,7 +283,7 @@ const messages = [
         description: [
             '**`!test`** — Run all three test flows (card night + giveaway/spin + race conditions). All output routes to #test-suite. Ends with data reset.',
             '',
-            '**`!test card-night`** — Card night critical path (72 steps: hype → live → sells → lists → pulls → battles → coupons → queue → duck race → analytics → shipping → offline → dropped-off).',
+            '**`!test card-night`** — Card night critical path (81 steps: hype → live → purchases → sells → lists → pulls → battles → coupons → duck races → analytics → shipping → tracking → dropped-off → audit → waive → refund).',
             '',
             '**`!test giveaway`** — Giveaway & spin flow (16 steps: standard giveaway → social giveaway → cancel → all spin variants).',
             '',

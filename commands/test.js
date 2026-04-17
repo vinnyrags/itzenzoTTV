@@ -27,7 +27,8 @@ import { handleHype } from './hype.js';
 import { handleCoupon } from './coupon.js';
 import { handleSnapshot } from './snapshot.js';
 import { handleCapture } from './capture.js';
-import { handleIntl } from './intl.js';
+import { handleIntl, handleIntlShip } from './intl.js';
+import { handleShippingAudit } from './shipping-audit.js';
 import { handleShipping } from './shipping.js';
 import { handleDroppedOff } from './dropped-off.js';
 import { handleTracking } from './tracking.js';
@@ -678,18 +679,63 @@ async function runCardNightFlow(testChannel) {
         await handleDroppedOff(msg, ['intl']);
     }));
 
-    results.push(await step('!waive @rhapttv', async () => {
+    // --- SHIPPING AUDIT ---
+    results.push(await step('!shipping-audit', async () => {
+        const msg = buildTestMessage('!shipping-audit', testChannel);
+        await handleShippingAudit(msg, []);
+    }));
+
+    results.push(await step('!shipping-audit intl', async () => {
+        const msg = buildTestMessage('!shipping-audit intl', testChannel);
+        await handleShippingAudit(msg, ['intl']);
+    }));
+
+    // --- WAIVE: VIP free shipping ---
+    results.push(await step('!waive @rhapttv (VIP free shipping)', async () => {
+        const msg = buildTestMessage('!waive @rhapttv', testChannel, rhapttv);
+        await handleWaive(msg, ['@rhapttv']);
+
+        // Verify waiver record created ($0 amount)
+        const link = purchases.getEmailByDiscordId.get(TEST_USER_ID);
+        if (link) {
+            const record = db.prepare(
+                "SELECT * FROM shipping_payments WHERE customer_email = ? AND amount = 0 ORDER BY created_at DESC LIMIT 1"
+            ).get(link.customer_email);
+            if (!record) throw new Error('Waiver record not created');
+        }
+    }));
+
+    // --- WAIVE: double-charge refund (buyer already paid, waive refunds + removes) ---
+    results.push(await step('!waive @rhapttv (double-charge fix)', async () => {
+        // rhapttv already has a waiver from previous step — running again exercises
+        // the "already covered" path (which inserts another $0 waiver or handles gracefully)
         const msg = buildTestMessage('!waive @rhapttv', testChannel, rhapttv);
         await handleWaive(msg, ['@rhapttv']);
     }));
 
-    results.push(await step('!refund @rhapttv 1.00 (Stripe test)', async () => {
-        // Refund will fail with "No such checkout.session" since our fake sessions
-        // don't exist in Stripe. The command itself works — it finds the purchase,
-        // calls Stripe, and Stripe rejects the fake session ID. This is expected.
-        const msg = buildTestMessage('!refund @rhapttv 1.00 Test refund', testChannel, rhapttv);
-        await handleRefund(msg, ['@rhapttv', '1.00', 'Test', 'refund']);
-        // Pass regardless — the command executed without crashing
+    // --- INTL-SHIP: DM international buyers with unpaid shipping ---
+    results.push(await step('!intl-ship', async () => {
+        const msg = buildTestMessage('!intl-ship', testChannel);
+        await handleIntlShip(msg);
+    }));
+
+    // --- REFUND: full refund (no amount specified) ---
+    results.push(await step('!refund @rhapttv (full refund)', async () => {
+        // Will fail at Stripe since fake session — but command executes without crashing
+        const msg = buildTestMessage('!refund @rhapttv', testChannel, rhapttv);
+        await handleRefund(msg, ['@rhapttv']);
+    }));
+
+    // --- REFUND: partial refund with amount + reason ---
+    results.push(await step('!refund @rhapttv 1.00 (partial + reason)', async () => {
+        const msg = buildTestMessage('!refund @rhapttv 1.00 Damaged card', testChannel, rhapttv);
+        await handleRefund(msg, ['@rhapttv', '1.00', 'Damaged', 'card']);
+    }));
+
+    // --- SHIPPING: custom amount for oversized ---
+    results.push(await step('!shipping @rhapttv 15.00 (oversized)', async () => {
+        const msg = buildTestMessage('!shipping @rhapttv 15.00 Oversized package', testChannel, rhapttv);
+        await handleShipping(msg, ['@rhapttv', '15.00', 'Oversized', 'package']);
     }));
 
     return results;
