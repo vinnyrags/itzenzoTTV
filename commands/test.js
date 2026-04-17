@@ -14,7 +14,7 @@
 import { EmbedBuilder } from 'discord.js';
 import Stripe from 'stripe';
 import config from '../config.js';
-import { db, purchases, cardListings, listSessions, battles, queues, giveaways, discordLinks, goals } from '../db.js';
+import { db, purchases, cardListings, listSessions, battles, queues, giveaways, discordLinks, goals, tracking } from '../db.js';
 import { client, getChannel, setChannelOverride, clearChannelOverrides, getMember } from '../discord.js';
 import { handleSell, handleList, handleSold } from './card-shop.js';
 import { handlePull } from './pull.js';
@@ -642,6 +642,15 @@ async function runCardNightFlow(testChannel) {
     results.push(await step('!tracking @rhapttv (add)', async () => {
         const msg = buildTestMessage(`!tracking <@${TEST_USER_ID}> 9400111899223847263910 USPS`, testChannel, rhapttv);
         await handleTracking(msg, [`<@${TEST_USER_ID}>`, '9400111899223847263910', 'USPS']);
+
+        // Verify tracking stored in DB
+        const link = purchases.getEmailByDiscordId.get(TEST_USER_ID);
+        if (!link) throw new Error('No email link for test user');
+        const record = tracking.getRecentByEmail.get(link.customer_email);
+        if (!record) throw new Error('Tracking not stored in DB');
+        if (record.tracking_number !== '9400111899223847263910') throw new Error('Wrong tracking number');
+        if (record.carrier !== 'USPS') throw new Error('Wrong carrier');
+        if (!record.tracking_url) throw new Error('Tracking URL not generated');
     }));
 
     results.push(await step('!tracking list', async () => {
@@ -649,10 +658,19 @@ async function runCardNightFlow(testChannel) {
         await handleTracking(msg, ['list']);
     }));
 
-    // --- POST-STREAM (dropped-off should now include tracking) ---
+    // --- POST-STREAM (dropped-off should now include tracking in DMs) ---
     results.push(await step('!dropped-off (with tracking)', async () => {
         const msg = buildTestMessage('!dropped-off', testChannel);
         await handleDroppedOff(msg, []);
+    }));
+
+    results.push(await step('!tracking clear', async () => {
+        const msg = buildTestMessage('!tracking clear', testChannel);
+        await handleTracking(msg, ['clear']);
+
+        // Verify tracking table is empty
+        const all = tracking.getAll.all();
+        if (all.length > 0) throw new Error(`Expected 0 tracking entries, got ${all.length}`);
     }));
 
     results.push(await step('!dropped-off intl', async () => {
@@ -1003,7 +1021,7 @@ async function handleTest(message, args) {
             'pull_entries', 'card_listings', 'list_sessions',
             'livestream_buyers', 'livestream_sessions',
             'purchases', 'purchase_counts', 'discord_links',
-            'shipping_payments', 'active_coupons',
+            'shipping_payments', 'active_coupons', 'tracking',
         ];
 
         const cleared = [];
@@ -1069,7 +1087,7 @@ async function runTestSuite(flow) {
             'pull_entries', 'card_listings', 'list_sessions',
             'livestream_buyers', 'livestream_sessions',
             'purchases', 'purchase_counts', 'discord_links',
-            'shipping_payments', 'active_coupons',
+            'shipping_payments', 'active_coupons', 'tracking',
         ];
 
         for (const table of TABLES_TO_CLEAR) {
