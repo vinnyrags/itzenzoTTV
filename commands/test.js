@@ -768,6 +768,153 @@ async function runGiveawayFlow(testChannel) {
 }
 
 // =========================================================================
+// Flow 3: Race Condition Verification
+// =========================================================================
+
+async function runRaceConditionFlow(testChannel) {
+    const results = [];
+
+    await testChannel.send({ embeds: [new EmbedBuilder().setTitle('🏁 Race Condition Verification').setDescription('Testing atomic operations on the live database...').setColor(0xceff00)] });
+
+    // --- CARD LISTING: atomic reservation ---
+    results.push(await step('Card reservation: only one buyer wins', async () => {
+        cardListings.create.run('RACE Card', 1000, null, 'active');
+        const listing = db.prepare("SELECT * FROM card_listings WHERE card_name = 'RACE Card' ORDER BY id DESC LIMIT 1").get();
+
+        const r1 = cardListings.reserveForBuyer.run('buyer_A', listing.id);
+        const r2 = cardListings.reserveForBuyer.run('buyer_B', listing.id);
+
+        if (r1.changes !== 1) throw new Error('First buyer should win');
+        if (r2.changes !== 0) throw new Error('Second buyer should lose');
+
+        const updated = cardListings.getById.get(listing.id);
+        if (updated.buyer_discord_id !== 'buyer_A') throw new Error(`Wrong winner: ${updated.buyer_discord_id}`);
+
+        await testChannel.send('> ✅ Two buyers raced for same card — only buyer_A reserved it');
+    }));
+
+    // --- DUCK RACE: atomic claimForRace ---
+    results.push(await step('Duck race: only one race can claim a queue', async () => {
+        queues.createQueue.run();
+        const queue = queues.getActiveQueue.get();
+        queues.addEntry.run(queue.id, 'race_user_1', 'r1@test.com', 'Product', 1, `race_s1_${Date.now()}`);
+        queues.addEntry.run(queue.id, 'race_user_2', 'r2@test.com', 'Product', 1, `race_s2_${Date.now()}`);
+
+        const claim1 = queues.claimForRace.run(queue.id);
+        const claim2 = queues.claimForRace.run(queue.id);
+
+        if (claim1.changes !== 1) throw new Error('First claim should succeed');
+        if (claim2.changes !== 0) throw new Error('Second claim should fail');
+
+        const q = queues.getQueueById.get(queue.id);
+        if (q.status !== 'racing') throw new Error(`Queue status should be racing, got: ${q.status}`);
+
+        // Clean up — set winner so finalize flow works
+        queues.setDuckRaceWinner.run('race_user_1', queue.id);
+        await testChannel.send('> ✅ Two races tried to start — only the first claimed the queue');
+    }));
+
+    // --- GIVEAWAY: UNIQUE prevents double-entry ---
+    results.push(await step('Giveaway: double-click prevented by UNIQUE', async () => {
+        giveaways.create.run('RACE Prize', null, 0, null);
+        const giveaway = giveaways.getActive.get();
+
+        const r1 = giveaways.addEntry.run(giveaway.id, TEST_USER_ID, 'rhapttv');
+        const r2 = giveaways.addEntry.run(giveaway.id, TEST_USER_ID, 'rhapttv');
+
+        if (r1.changes !== 1) throw new Error('First entry should succeed');
+        if (r2.changes !== 0) throw new Error('Second entry should be silently rejected');
+
+        const count = giveaways.getEntryCount.get(giveaway.id).count;
+        if (count !== 1) throw new Error(`Expected 1 entry, got ${count}`);
+
+        giveaways.cancel.run(giveaway.id);
+        await testChannel.send('> ✅ Same user clicked Enter twice — only one entry created');
+    }));
+
+    // --- BATTLE: atomic capacity check ---
+    results.push(await step('Battle: capacity enforced atomically', async () => {
+        battles.createBattle.run('race-slug', 'RACE Product', 'price_race', 2, null);
+        const battle = battles.getActiveBattle.get();
+
+        const r1 = battles.addEntry.run(battle.id, 'battle_user_1', battle.id, battle.id);
+        const r2 = battles.addEntry.run(battle.id, 'battle_user_2', battle.id, battle.id);
+        const r3 = battles.addEntry.run(battle.id, 'battle_user_3', battle.id, battle.id);
+
+        if (r1.changes !== 1 || r2.changes !== 1) throw new Error('First two entries should succeed');
+        if (r3.changes !== 0) throw new Error('Third entry should be rejected (battle full)');
+
+        battles.cancelBattle.run(battle.id);
+        await testChannel.send('> ✅ Battle with max 2 entries — third buyer rejected atomically');
+    }));
+
+    // --- SHIPPING: UNIQUE index prevents double-payment ---
+    results.push(await step('Shipping: webhook retry prevented by UNIQUE index', async () => {
+        const sessionId = `race_shipping_${Date.now()}`;
+        db.prepare('INSERT OR IGNORE INTO shipping_payments (customer_email, discord_user_id, amount, source, stripe_session_id) VALUES (?, ?, ?, ?, ?)').run('race@test.com', 'race_user', 1000, 'checkout', sessionId);
+        db.prepare('INSERT OR IGNORE INTO shipping_payments (customer_email, discord_user_id, amount, source, stripe_session_id) VALUES (?, ?, ?, ?, ?)').run('race@test.com', 'race_user', 1000, 'checkout', sessionId);
+
+        const count = db.prepare('SELECT COUNT(*) as count FROM shipping_payments WHERE stripe_session_id = ?').get(sessionId).count;
+        if (count !== 1) throw new Error(`Expected 1 shipping record, got ${count}`);
+
+        await testChannel.send('> ✅ Same Stripe session processed twice — only one shipping record');
+    }));
+
+    // --- COUPON: atomic single-active enforcement ---
+    results.push(await step('Coupon: only one can be active at a time', async () => {
+        const activateStmt = db.prepare(`
+            INSERT INTO active_coupons (promo_code, stripe_promo_id, stripe_coupon_id, discount_display)
+            SELECT ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM active_coupons WHERE status = 'active')
+        `);
+
+        const r1 = activateStmt.run('RACE_A', 'promo_a', 'coupon_a', '$5 off');
+        const r2 = activateStmt.run('RACE_B', 'promo_b', 'coupon_b', '10% off');
+
+        if (r1.changes !== 1) throw new Error('First coupon should activate');
+        if (r2.changes !== 0) throw new Error('Second coupon should be rejected');
+
+        // Deactivate and verify second can now activate
+        const active = db.prepare("SELECT * FROM active_coupons WHERE status = 'active' LIMIT 1").get();
+        db.prepare("UPDATE active_coupons SET status = 'inactive' WHERE id = ?").run(active.id);
+        const r3 = activateStmt.run('RACE_B', 'promo_b', 'coupon_b', '10% off');
+        if (r3.changes !== 1) throw new Error('Second coupon should activate after first deactivated');
+
+        await testChannel.send('> ✅ Two coupons tried to activate — only one succeeded until the first was deactivated');
+    }));
+
+    // --- CARD TTL vs PAYMENT: expired listing still accepts payment ---
+    results.push(await step('TTL vs payment: payment wins over expiry', async () => {
+        cardListings.create.run('RACE TTL Card', 500, null, 'active');
+        const listing = db.prepare("SELECT * FROM card_listings WHERE card_name = 'RACE TTL Card' ORDER BY id DESC LIMIT 1").get();
+
+        // TTL fires first
+        cardListings.markExpired.run(listing.id);
+        if (cardListings.getById.get(listing.id).status !== 'expired') throw new Error('Should be expired');
+
+        // Payment arrives after
+        cardListings.markSold.run(listing.id);
+        if (cardListings.getById.get(listing.id).status !== 'sold') throw new Error('Payment should override expiry');
+
+        await testChannel.send('> ✅ Card expired by TTL, then payment arrived — marked as sold');
+    }));
+
+    // --- PURCHASES: webhook retry dedup ---
+    results.push(await step('Purchases: webhook retry deduplicated', async () => {
+        const sessionId = `race_purchase_${Date.now()}`;
+        purchases.insertPurchase.run(sessionId, TEST_USER_ID, TEST_EMAIL, 'RACE Product', 1000);
+        purchases.insertPurchase.run(sessionId, TEST_USER_ID, TEST_EMAIL, 'RACE Product', 1000);
+
+        const count = db.prepare('SELECT COUNT(*) as count FROM purchases WHERE stripe_session_id = ?').get(sessionId).count;
+        if (count !== 1) throw new Error(`Expected 1 purchase, got ${count}`);
+
+        await testChannel.send('> ✅ Same Stripe session webhook fired twice — only one purchase recorded');
+    }));
+
+    return results;
+}
+
+// =========================================================================
 // Results embed
 // =========================================================================
 
@@ -829,6 +976,10 @@ async function handleTest(message, args) {
             const results = await runGiveawayFlow(testChannel);
             await postResultsEmbed(testChannel, results, 'Giveaway & Spin');
         }
+        if (sub === 'race' || !sub) {
+            const results = await runRaceConditionFlow(testChannel);
+            await postResultsEmbed(testChannel, results, 'Race Condition Verification');
+        }
 
         // Direct reset — bypass handleReset's confirmation flow
         clearChannelOverrides();
@@ -888,6 +1039,11 @@ async function runTestSuite(flow) {
         if (!flow || flow === 'giveaway') {
             const results = await runGiveawayFlow(testChannel);
             await postResultsEmbed(testChannel, results, 'Giveaway & Spin');
+            allResults.push(...results);
+        }
+        if (!flow || flow === 'race') {
+            const results = await runRaceConditionFlow(testChannel);
+            await postResultsEmbed(testChannel, results, 'Race Condition Verification');
             allResults.push(...results);
         }
 
