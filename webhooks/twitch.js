@@ -38,7 +38,7 @@ function verifyTwitchSignature(req) {
  * Handle stream.online event.
  */
 async function handleStreamOnline(event) {
-    const streamTitle = event.title || 'itzenzoTTV is live!';
+    const streamTitle = event.title || 'itzenzo.tv is live!';
 
     await sendEmbed('ANNOUNCEMENTS', {
         title: '🔴 We\'re Live!',

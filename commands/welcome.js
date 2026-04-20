@@ -11,7 +11,7 @@ import { client, getChannel } from '../discord.js';
 
 function buildWelcomeEmbed() {
     return new EmbedBuilder()
-        .setTitle('Welcome to itzenzoTTV')
+        .setTitle('Welcome to itzenzo.tv')
         .setDescription(
             'Cards. Games. Community. Welcome to the family.\n\n' +
             'We run card nights **Monday through Thursday** — pack openings, pack battles, duck races, and more. ' +
@@ -50,7 +50,7 @@ function buildWelcomeEmbed() {
                     '**Long** — 5+ purchases (loyalty recognized)',
             },
         )
-        .setFooter({ text: 'itzenzoTTV — Cards. Games. After Dark.' });
+        .setFooter({ text: 'itzenzo.tv — Cards. Games. After Dark.' });
 }
 
 function buildWelcomeButton() {

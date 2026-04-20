@@ -156,7 +156,7 @@ const messages = [
             '```',
             'Duck race timer   → online-stopwatch.com/duck-race',
             'Card values       → tcgrepublic.com',
-            'Shop              → vincentragosta.io/shop',
+            'Shop              → itzenzo.tv',
             'Pricing formula   → cost × 1.45, round up',
             '```',
         ].join('\n'),

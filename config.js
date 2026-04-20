@@ -41,7 +41,7 @@ export default {
 
     // Server
     PORT: parseInt(process.env.BOT_PORT || '3100', 10),
-    SHOP_URL: optional('SHOP_URL', 'https://vincentragosta.io/shop'),
+    SHOP_URL: optional('SHOP_URL', 'https://itzenzo.tv'),
     SITE_URL: optional('SITE_URL', 'https://vincentragosta.io'),
     LIVESTREAM_SECRET: optional('LIVESTREAM_SECRET', 'itzenzo-live'),
 

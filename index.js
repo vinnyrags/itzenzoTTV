@@ -1,5 +1,5 @@
 /**
- * Nous — Discord bot for itzenzoTTV.
+ * Nous — Discord bot for itzenzo.tv.
  *
  * Features:
  *  - Order notifications (Stripe → #order-feed)

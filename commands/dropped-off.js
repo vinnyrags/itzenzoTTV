@@ -116,7 +116,7 @@ async function handleDroppedOff(message, args = []) {
         const embed = new EmbedBuilder()
             .setTitle('📦 Your Order Is On Its Way!')
             .setDescription(
-                `Hey! Your order from itzenzoTTV has been shipped:\n\n${productList}\n${trackingSection}`
+                `Hey! Your order from itzenzo.tv has been shipped:\n\n${productList}\n${trackingSection}`
             )
             .setColor(0xceff00)
             .setFooter({ text: `Shipped ${new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York' })}` });
