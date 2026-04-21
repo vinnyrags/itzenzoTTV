@@ -267,3 +267,69 @@ describe('card listing TTL vs payment race', () => {
         expect(listing.sold_at).toBeTruthy();
     });
 });
+
+// =========================================================================
+// Pull box — atomic capacity enforcement
+// =========================================================================
+
+describe('pull box capacity', () => {
+    it('allows purchases under the cap', () => {
+        stmts.cardListings.create.run('Test Pull Box', 300, null, 'pull');
+        stmts.cardListings.setMaxQuantity.run(5, 1);
+
+        const r1 = stmts.cardListings.incrementPurchaseCountCapped.run(2, 1, 2);
+        expect(r1.changes).toBe(1);
+
+        const listing = stmts.cardListings.getById.get(1);
+        expect(listing.purchase_count).toBe(2);
+    });
+
+    it('rejects purchases that would exceed the cap', () => {
+        stmts.cardListings.create.run('Capped Box', 300, null, 'pull');
+        stmts.cardListings.setMaxQuantity.run(3, 1);
+
+        // Fill to 2
+        stmts.cardListings.incrementPurchaseCountCapped.run(2, 1, 2);
+
+        // Try to buy 2 more (would be 4, exceeds 3)
+        const r = stmts.cardListings.incrementPurchaseCountCapped.run(2, 1, 2);
+        expect(r.changes).toBe(0);
+
+        const listing = stmts.cardListings.getById.get(1);
+        expect(listing.purchase_count).toBe(2); // unchanged
+    });
+
+    it('allows exactly filling the cap', () => {
+        stmts.cardListings.create.run('Exact Box', 300, null, 'pull');
+        stmts.cardListings.setMaxQuantity.run(3, 1);
+
+        const r = stmts.cardListings.incrementPurchaseCountCapped.run(3, 1, 3);
+        expect(r.changes).toBe(1);
+
+        const listing = stmts.cardListings.getById.get(1);
+        expect(listing.purchase_count).toBe(3);
+    });
+
+    it('rejects any purchase after cap is reached', () => {
+        stmts.cardListings.create.run('Full Box', 300, null, 'pull');
+        stmts.cardListings.setMaxQuantity.run(1, 1);
+
+        stmts.cardListings.incrementPurchaseCountCapped.run(1, 1, 1);
+        const r = stmts.cardListings.incrementPurchaseCountCapped.run(1, 1, 1);
+        expect(r.changes).toBe(0);
+    });
+
+    it('allows unlimited purchases when max_quantity is NULL', () => {
+        stmts.cardListings.create.run('Unlimited Box', 300, null, 'pull');
+        // No setMaxQuantity — stays NULL
+
+        const r1 = stmts.cardListings.incrementPurchaseCountCapped.run(100, 1, 100);
+        expect(r1.changes).toBe(1);
+
+        const r2 = stmts.cardListings.incrementPurchaseCountCapped.run(100, 1, 100);
+        expect(r2.changes).toBe(1);
+
+        const listing = stmts.cardListings.getById.get(1);
+        expect(listing.purchase_count).toBe(200);
+    });
+});

@@ -289,6 +289,9 @@ try { db.exec(`ALTER TABLE giveaways ADD COLUMN social_link TEXT`); } catch { /*
 try { db.exec(`ALTER TABLE giveaway_entries ADD COLUMN tiktok_username TEXT`); } catch { /* exists */ }
 
 // Store full shipping address and ShippingEasy order link on purchases (v11)
+// Add max_quantity for pull box stock caps (v12)
+try { db.exec(`ALTER TABLE card_listings ADD COLUMN max_quantity INTEGER DEFAULT NULL`); } catch { /* exists */ }
+
 try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_name TEXT DEFAULT NULL`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_address TEXT DEFAULT NULL`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_city TEXT DEFAULT NULL`); } catch { /* exists */ }
@@ -693,6 +696,17 @@ const cardListingStmts = {
 
     incrementPurchaseCount: db.prepare(`
         UPDATE card_listings SET purchase_count = purchase_count + 1 WHERE id = ?
+    `),
+
+    setMaxQuantity: db.prepare(`
+        UPDATE card_listings SET max_quantity = ? WHERE id = ?
+    `),
+
+    incrementPurchaseCountCapped: db.prepare(`
+        UPDATE card_listings
+        SET purchase_count = purchase_count + ?
+        WHERE id = ? AND status = 'pull'
+          AND (max_quantity IS NULL OR purchase_count + ? <= max_quantity)
     `),
 
     setBuyerDmMessageId: db.prepare(`

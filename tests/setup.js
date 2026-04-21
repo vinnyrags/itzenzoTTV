@@ -181,6 +181,7 @@ export function createTestDb() {
             buyer_dm_message_id TEXT,
             status TEXT DEFAULT 'active',
             purchase_count INTEGER DEFAULT 0,
+            max_quantity INTEGER DEFAULT NULL,
             created_at TEXT DEFAULT (datetime('now')),
             sold_at TEXT,
             list_session_id INTEGER DEFAULT NULL
@@ -299,6 +300,8 @@ export function buildStmts(db) {
             relistAsActive: db.prepare(`UPDATE card_listings SET status = 'active', buyer_discord_id = NULL, stripe_session_id = NULL WHERE id = ?`),
             getByStatus: db.prepare(`SELECT * FROM card_listings WHERE status = ? ORDER BY created_at DESC LIMIT 1`),
             incrementPurchaseCount: db.prepare(`UPDATE card_listings SET purchase_count = purchase_count + 1 WHERE id = ?`),
+            setMaxQuantity: db.prepare(`UPDATE card_listings SET max_quantity = ? WHERE id = ?`),
+            incrementPurchaseCountCapped: db.prepare(`UPDATE card_listings SET purchase_count = purchase_count + ? WHERE id = ? AND status = 'pull' AND (max_quantity IS NULL OR purchase_count + ? <= max_quantity)`),
             setBuyerDmMessageId: db.prepare(`UPDATE card_listings SET buyer_dm_message_id = ? WHERE id = ?`),
             reserveForBuyer: db.prepare(`UPDATE card_listings SET status = 'reserved', buyer_discord_id = ? WHERE id = ? AND status = 'active'`),
             expireBySessionId: db.prepare(`UPDATE card_listings SET status = 'expired' WHERE list_session_id = ? AND status IN ('active', 'reserved')`),

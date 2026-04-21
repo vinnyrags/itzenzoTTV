@@ -333,6 +333,11 @@ async function handlePullBuy(interaction, listingId) {
         return interaction.editReply({ content: 'This pull box is no longer available.' });
     }
 
+    // Check capacity
+    if (listing.max_quantity && listing.purchase_count >= listing.max_quantity) {
+        return interaction.editReply({ content: '🚫 This pull box is sold out!' });
+    }
+
     const covered = hasShippingCoveredByDiscordId(discordUserId);
     const checkoutUrl = buildCheckoutUrl(`card-shop/checkout/${listingId}`, discordUserId);
 
