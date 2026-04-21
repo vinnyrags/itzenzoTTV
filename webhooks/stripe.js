@@ -27,14 +27,21 @@ const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 /**
  * Process a completed checkout session.
  */
-async function handleCheckoutCompleted(session) {
+/**
+ * Phase 1: Critical path — must complete before responding to Stripe.
+ * Records purchase, links Discord, stores shipping, creates ShippingEasy order.
+ * No Discord API calls here — those happen in Phase 2 (notifications).
+ *
+ * Returns { customerEmail, discordUserId, lineItems } for Phase 2.
+ */
+async function handleCheckoutCritical(session) {
     // Ad-hoc shipping — record in unified tracker
     if (session.metadata?.source === 'ad-hoc-shipping') {
         const email = session.customer_details?.email;
         if (email) {
             recordShipping(email, session.metadata.discord_user_id || null, session.amount_total || 0, 'ad-hoc', session.id);
         }
-        return;
+        return null;
     }
 
     const customerEmail = session.customer_details?.email || session.customer_email;
@@ -83,22 +90,88 @@ async function handleCheckoutCompleted(session) {
         }
     }
 
-    // Process each line item
+    // Record each purchase
     for (const item of lineItems) {
-        const productName = item.name || 'Unknown Product';
-        const quantity = item.quantity || 1;
-        const stock = item.stock_remaining;
-
-        // Record purchase
         purchases.insertPurchase.run(
             session.id,
             discordUserId,
             customerEmail,
-            productName,
+            item.name || 'Unknown Product',
             totalAmount
         );
+    }
 
-        // Low-stock alert in #deals
+    // Increment purchase count for role promotion tracking
+    if (discordUserId) {
+        purchases.incrementPurchaseCount.run(discordUserId);
+    }
+
+    // Track revenue toward community goals (shipping excluded)
+    const productRevenue = session.amount_subtotal || session.amount_total || 0;
+    if (productRevenue > 0) {
+        await addRevenue(productRevenue);
+    }
+
+    // Track shipping paid at checkout
+    const shippingAmount = session.shipping_cost?.amount_total
+        || session.total_details?.amount_shipping
+        || 0;
+    if (shippingAmount > 0 && customerEmail) {
+        recordShipping(customerEmail, discordUserId, shippingAmount, 'checkout', session.id);
+    }
+
+    // Auto-flag international buyers from shipping address
+    const shippingCountry = session.shipping_details?.address?.country;
+    if (shippingCountry && shippingCountry !== 'US' && discordUserId) {
+        discordLinks.setCountry.run(shippingCountry, discordUserId);
+        console.log(`Auto-flagged international: ${discordUserId} → ${shippingCountry}`);
+    }
+
+    // Store full shipping address and create ShippingEasy order
+    const shippingDetails = session.shipping_details;
+    if (shippingDetails?.address) {
+        const addr = shippingDetails.address;
+        const name = session.customer_details?.name || shippingDetails.name || '';
+        purchases.updateShippingAddress.run(
+            name,
+            addr.line1 + (addr.line2 ? `, ${addr.line2}` : ''),
+            addr.city || '',
+            addr.state || '',
+            addr.postal_code || '',
+            addr.country || '',
+            session.id,
+        );
+
+        const source = session.metadata?.source || '';
+        if (source !== 'pack-battle' && source !== 'ad-hoc-shipping') {
+            const orderId = await createOrder({
+                stripeSessionId: session.id,
+                customerName: name,
+                email: customerEmail,
+                address: addr,
+                lineItems: lineItems || [],
+            });
+            if (orderId) {
+                purchases.setShippingEasyOrderId.run(orderId, session.id);
+            }
+        }
+    }
+
+    return { customerEmail, discordUserId, lineItems, totalAmount };
+}
+
+/**
+ * Phase 2: Notifications — Discord DMs, embeds, role promotions, queue entries.
+ * Fire-and-forget after Stripe has been responded to. Failures are logged but
+ * don't affect the purchase record.
+ */
+async function handleCheckoutNotifications(session, context) {
+    const { customerEmail, discordUserId, lineItems, totalAmount } = context;
+
+    // Low-stock and sold-out alerts
+    for (const item of lineItems) {
+        const stock = item.stock_remaining;
+        const productName = item.name || 'Unknown Product';
         if (stock !== undefined && stock <= config.LOW_STOCK_THRESHOLD && stock > 0) {
             await sendEmbed('DEALS', {
                 title: '\u26A0\uFE0F Low Stock Alert',
@@ -106,8 +179,6 @@ async function handleCheckoutCompleted(session) {
                 color: 0xe74c3c,
             });
         }
-
-        // Sold out alert
         if (stock !== undefined && stock === 0) {
             await sendEmbed('DEALS', {
                 title: '\uD83D\uDEAB Sold Out',
@@ -117,7 +188,7 @@ async function handleCheckoutCompleted(session) {
         }
     }
 
-    // Post one consolidated order notification in #order-feed
+    // Order notification in #order-feed
     if (lineItems.length > 0) {
         const hasIdentity = !!discordUserId;
         const itemList = lineItems.map((item) => {
@@ -166,7 +237,7 @@ async function handleCheckoutCompleted(session) {
         }
     }
 
-    // Add card product purchases to the active queue (skip battles and individual card sales)
+    // Add to queue (skip battles and individual card sales)
     if (session.metadata?.source !== 'pack-battle' && session.metadata?.source !== 'card-sale') {
         for (const item of lineItems) {
             const productName = item.name || 'Unknown Product';
@@ -180,70 +251,28 @@ async function handleCheckoutCompleted(session) {
 
     // Role promotion
     if (discordUserId) {
-        purchases.incrementPurchaseCount.run(discordUserId);
         await checkRolePromotion(discordUserId);
     }
 
-    // Check if this payment is for an active pack battle
+    // Check battle payment
     await checkBattlePayment(session, discordUserId);
 
-    // Check if this payment is for a card sale
+    // Check card sale payment
     await checkCardSalePayment(session, discordUserId, lineItems);
 
-    // Track revenue toward community goals (shipping excluded)
-    const productRevenue = session.amount_subtotal || session.amount_total || 0;
-    if (productRevenue > 0) {
-        await addRevenue(productRevenue);
-    }
-
-    // Track shipping paid at checkout (non-livestream purchases that included shipping)
-    const shippingAmount = session.shipping_cost?.amount_total
-        || session.total_details?.amount_shipping
-        || 0;
-    if (shippingAmount > 0 && customerEmail) {
-        recordShipping(customerEmail, discordUserId, shippingAmount, 'checkout', session.id);
-    }
-
-    // Auto-flag international buyers from shipping address
-    const shippingCountry = session.shipping_details?.address?.country;
-    if (shippingCountry && shippingCountry !== 'US' && discordUserId) {
-        discordLinks.setCountry.run(shippingCountry, discordUserId);
-        console.log(`Auto-flagged international: ${discordUserId} → ${shippingCountry}`);
-    }
-
-    // Store full shipping address and create ShippingEasy order
-    const shippingDetails = session.shipping_details;
-    if (shippingDetails?.address) {
-        const addr = shippingDetails.address;
-        const name = session.customer_details?.name || shippingDetails.name || '';
-        purchases.updateShippingAddress.run(
-            name,
-            addr.line1 + (addr.line2 ? `, ${addr.line2}` : ''),
-            addr.city || '',
-            addr.state || '',
-            addr.postal_code || '',
-            addr.country || '',
-            session.id,
-        );
-
-        // Create ShippingEasy order (skip battle buy-ins and ad-hoc shipping)
-        const source = session.metadata?.source || '';
-        if (source !== 'pack-battle' && source !== 'ad-hoc-shipping') {
-            const orderId = await createOrder({
-                stripeSessionId: session.id,
-                customerName: name,
-                email: customerEmail,
-                address: addr,
-                lineItems: lineItems || [],
-            });
-            if (orderId) {
-                purchases.setShippingEasyOrderId.run(orderId, session.id);
-            }
-        }
-    }
-
-    // Detect shipping mismatch — international address but domestic rate selected
+    // Detect shipping mismatch
     await checkShippingMismatch(session, discordUserId, customerEmail);
+}
+
+/**
+ * Combined handler — used by tests and direct calls.
+ * Runs both phases sequentially (same behavior as before the split).
+ */
+async function handleCheckoutCompleted(session) {
+    const context = await handleCheckoutCritical(session);
+    if (context) {
+        await handleCheckoutNotifications(session, context);
+    }
 }
 
 /**
@@ -468,4 +497,4 @@ async function checkCardSalePayment(session, discordUserId, lineItems = []) {
     console.log(`Card listing #${listingId} sold: ${listing.card_name}`);
 }
 
-export { handleCheckoutCompleted };
+export { handleCheckoutCritical, handleCheckoutNotifications, handleCheckoutCompleted };

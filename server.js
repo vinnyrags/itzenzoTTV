@@ -13,7 +13,7 @@ import express from 'express';
 import Stripe from 'stripe';
 import config from './config.js';
 import { battles, cardListings, purchases, discordLinks } from './db.js';
-import { handleCheckoutCompleted } from './webhooks/stripe.js';
+import { handleCheckoutCritical, handleCheckoutNotifications, handleCheckoutCompleted } from './webhooks/stripe.js';
 import { handleTwitchWebhook } from './webhooks/twitch.js';
 import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
 import {
@@ -66,9 +66,19 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
 
     try {
         switch (event.type) {
-            case 'checkout.session.completed':
-                await handleCheckoutCompleted(event.data.object);
-                break;
+            case 'checkout.session.completed': {
+                // Phase 1: Critical path — record purchase, respond to Stripe fast
+                const context = await handleCheckoutCritical(event.data.object);
+                res.sendStatus(200);
+
+                // Phase 2: Notifications — fire-and-forget after responding to Stripe
+                if (context) {
+                    handleCheckoutNotifications(event.data.object, context).catch(e =>
+                        console.error('Notification error:', e.message)
+                    );
+                }
+                return;
+            }
             default:
                 console.log('Unhandled Stripe event:', event.type);
         }
