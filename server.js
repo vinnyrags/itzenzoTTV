@@ -16,6 +16,9 @@ import { battles, cardListings, purchases, discordLinks } from './db.js';
 import { handleCheckoutCritical, handleCheckoutNotifications, handleCheckoutCompleted } from './webhooks/stripe.js';
 import { handleTwitchWebhook } from './webhooks/twitch.js';
 import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
+import { createLimiter } from './webhook-limiter.js';
+
+const webhookLimit = createLimiter(10);
 import {
     isInternationalByEmail,
     hasShippingCoveredByDiscordId,
@@ -68,7 +71,8 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
         switch (event.type) {
             case 'checkout.session.completed': {
                 // Phase 1: Critical path — record purchase, respond to Stripe fast
-                const context = await handleCheckoutCritical(event.data.object);
+                // Limiter bounds concurrent DB operations to prevent event loop stalls
+                const context = await webhookLimit(() => handleCheckoutCritical(event.data.object));
                 res.sendStatus(200);
 
                 // Phase 2: Notifications — fire-and-forget after responding to Stripe
