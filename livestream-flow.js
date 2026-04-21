@@ -141,7 +141,7 @@ const messages = [
     {
         title: '📦 Shipping Reference',
         description: [
-            '**Domestic (US): $10/week  •  International (CA+): $25/month**',
+            '**Domestic (US): $10/week  •  International (CA+): $25/month** *(DM to ship early)*',
             '```',
             'Normal shop (email entered)    →  Bot checks coverage → $10/$25 or skip',
             'Normal shop (email skipped)    →  Both options at checkout, buyer picks',

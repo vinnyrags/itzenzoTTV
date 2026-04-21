@@ -254,7 +254,7 @@ const messages = [
         description: [
             '**Two tiers, two cadences:**',
             '• **Domestic (US):** $10 flat rate, collected weekly (Mon–Sun)',
-            '• **International (CA+):** $25 flat rate, collected monthly',
+            '• **International (CA+):** $25 flat rate, collected monthly (buyers can DM to ship early)',
             '',
             '```',
             'Normal shop (email entered)    →  Bot checks coverage → $10/$25 or skip',

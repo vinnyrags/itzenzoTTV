@@ -147,7 +147,8 @@ async function handleDroppedOff(message, args = []) {
     const orderFeedDesc = isIntlMode
         ? `International orders for this month have been shipped!\n\n` +
           `📦 **${unshipped.length} order${unshipped.length !== 1 ? 's' : ''} shipped to ${byUser.size} buyer${byUser.size !== 1 ? 's' : ''}** — Monthly batch\n\n` +
-          'If you placed an international order, check your DMs for details.'
+          'If you placed an international order, check your DMs for details.\n\n' +
+          'Want to ship sooner next time? DM me anytime and I can get your order out early.'
         : `All orders from this week have been dropped off and are on their way!\n\n` +
           `📦 **${unshipped.length + skipped.length} order${unshipped.length + skipped.length !== 1 ? 's' : ''} shipped to ${byUser.size + skipped.length} buyer${byUser.size + skipped.length !== 1 ? 's' : ''}**\n\n` +
           '📅 Expect delivery in 5-7 business days\n' +

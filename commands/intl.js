@@ -154,7 +154,8 @@ async function handleIntlShip(message) {
             .setDescription(
                 `You have outstanding international shipping for this month.\n\n` +
                 `📦 **[Pay ${formatShippingRate(config.SHIPPING.INTERNATIONAL)} International Shipping](${shippingUrl})**\n\n` +
-                `This covers all your purchases through the end of the month.`
+                `This covers all your purchases through the end of the month.\n\n` +
+                `Want to ship sooner? Just DM me and I can get your order out early.`
             )
             .setColor(0x3498db)
             .setFooter({ text: `${formatShippingRate(config.SHIPPING.INTERNATIONAL)} flat rate — covers all items this month.` });
