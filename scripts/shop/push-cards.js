@@ -174,11 +174,13 @@ async function main() {
             continue;
         }
 
-        // Build Stripe product name — disambiguates same-named cards in
-        // different sets in the Stripe dashboard.
+        // Build Stripe product name — include Variant when present so two
+        // printings of the same card (e.g. regular vs. Secret / Full Art)
+        // don't collide on identical name+number.
+        const variantSuffix = variant ? ` (${variant})` : '';
         const productName = cardNumber
-            ? `${name} #${cardNumber}${setName ? ' — ' + setName : ''}`
-            : setName ? `${name} — ${setName}` : name;
+            ? `${name}${variantSuffix} #${cardNumber}${setName ? ' — ' + setName : ''}`
+            : `${name}${variantSuffix}${setName ? ' — ' + setName : ''}`;
 
         const metadata = {
             type: 'card',
