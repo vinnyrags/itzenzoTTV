@@ -38,6 +38,7 @@ import { handleWaive } from './waive.js';
 import { handleRefund } from './refund.js';
 import { handleCheckoutCompleted } from '../webhooks/stripe.js';
 import { handleShippingEasyWebhook } from '../webhooks/shippingeasy.js';
+import { initMinecraftChannel, handleMinecraftReaction, REACTION_EMOJIS } from './minecraft.js';
 
 const TEST_USER_ID = '1490206350943191052'; // @rhapttv
 const TEST_EMAIL = 'itzenzottv+testaccount1@gmail.com';
@@ -47,7 +48,7 @@ const TEST_CHANNEL_ID = config.CHANNELS.TEST_SUITE;
 const OVERRIDE_KEYS = [
     'CARD_SHOP', 'ORDER_FEED', 'DEALS', 'QUEUE', 'GIVEAWAYS',
     'ANNOUNCEMENTS', 'ANALYTICS', 'MOMENTS', 'OPS', 'PACK_BATTLES',
-    'COMMUNITY_GOALS', 'SHIPPING_LABELS',
+    'COMMUNITY_GOALS', 'SHIPPING_LABELS', 'MINECRAFT',
 ];
 
 // =========================================================================
@@ -1224,6 +1225,110 @@ async function runLoadTestFlow(testChannel) {
 }
 
 // =========================================================================
+// Flow 6: Minecraft React-for-DM
+// =========================================================================
+
+async function runMinecraftFlow(testChannel) {
+    const results = [];
+    const { db, minecraft: minecraftDb } = await import('../db.js');
+
+    await testChannel.send({ embeds: [new EmbedBuilder().setTitle('🟢 Minecraft React-for-DM').setDescription('Starting...').setColor(0xceff00)] });
+
+    // --- INIT (posts the persistent embed + 3 reactions in #test-suite) ---
+    let postedMessageId;
+    results.push(await step('initMinecraftChannel posts embed + reactions', async () => {
+        // Reset stored message ID so init forces a fresh post
+        minecraftDb.setMessageId.run(null);
+        await initMinecraftChannel();
+        const row = minecraftDb.getConfig.get();
+        if (!row?.channel_message_id) throw new Error('No message ID stored after init');
+        postedMessageId = row.channel_message_id;
+
+        const msg = await testChannel.messages.fetch(postedMessageId);
+        if (!msg.embeds.length) throw new Error('Embed not posted');
+
+        // Wait briefly for reactions to register, then verify all 3 are present
+        await delay(1500);
+        const refreshed = await testChannel.messages.fetch(postedMessageId);
+        const present = REACTION_EMOJIS.filter((e) => refreshed.reactions.cache.has(e));
+        if (present.length !== REACTION_EMOJIS.length) {
+            throw new Error(`Expected ${REACTION_EMOJIS.length} reactions, found ${present.length}: ${present.join(' ')}`);
+        }
+    }));
+
+    // --- IDEMPOTENCY (re-running init keeps the same message) ---
+    results.push(await step('initMinecraftChannel is idempotent', async () => {
+        await initMinecraftChannel();
+        const row = minecraftDb.getConfig.get();
+        if (row.channel_message_id !== postedMessageId) {
+            throw new Error(`Message ID changed on re-init: ${postedMessageId} → ${row.channel_message_id}`);
+        }
+    }));
+
+    // --- REACTION HANDLER (each emoji triggers a DM attempt) ---
+    // Build a fake reaction/user pair; the DM call may fail since the bot
+    // can't DM itself, but the function should NOT throw and should still
+    // remove the user's reaction.
+    for (const emoji of REACTION_EMOJIS) {
+        results.push(await step(`handleMinecraftReaction (${emoji})`, async () => {
+            const msg = await testChannel.messages.fetch(postedMessageId);
+            let reactionRemoved = false;
+            const fakeReaction = {
+                emoji: { name: emoji },
+                message: { id: postedMessageId },
+                partial: false,
+                users: {
+                    remove: async () => { reactionRemoved = true; },
+                },
+            };
+            const fakeUser = { id: TEST_USER_ID, bot: false, tag: 'rhapttv#0', partial: false };
+
+            await handleMinecraftReaction(fakeReaction, fakeUser);
+            if (!reactionRemoved) throw new Error('Reaction not removed after handler ran');
+            void msg; // ensure compiler keeps fetch
+        }));
+    }
+
+    // --- WRONG MESSAGE (handler should silently ignore) ---
+    results.push(await step('handleMinecraftReaction ignores wrong message', async () => {
+        const fakeReaction = {
+            emoji: { name: '🪓' },
+            message: { id: 'not_the_minecraft_message' },
+            partial: false,
+            users: { remove: async () => { throw new Error('should not have removed reaction'); } },
+        };
+        const fakeUser = { id: TEST_USER_ID, bot: false, tag: 'rhapttv#0', partial: false };
+        await handleMinecraftReaction(fakeReaction, fakeUser);
+    }));
+
+    // --- WRONG EMOJI (handler should silently ignore) ---
+    results.push(await step('handleMinecraftReaction ignores wrong emoji', async () => {
+        const fakeReaction = {
+            emoji: { name: '🍕' },
+            message: { id: postedMessageId },
+            partial: false,
+            users: { remove: async () => { throw new Error('should not have removed reaction'); } },
+        };
+        const fakeUser = { id: TEST_USER_ID, bot: false, tag: 'rhapttv#0', partial: false };
+        await handleMinecraftReaction(fakeReaction, fakeUser);
+    }));
+
+    // --- BOT REACTION (handler should silently ignore) ---
+    results.push(await step('handleMinecraftReaction ignores bot users', async () => {
+        const fakeReaction = {
+            emoji: { name: '🪓' },
+            message: { id: postedMessageId },
+            partial: false,
+            users: { remove: async () => { throw new Error('should not have removed reaction'); } },
+        };
+        const fakeUser = { id: 'some_bot', bot: true, tag: 'somebot#0', partial: false };
+        await handleMinecraftReaction(fakeReaction, fakeUser);
+    }));
+
+    return results;
+}
+
+// =========================================================================
 // Results embed
 // =========================================================================
 
@@ -1296,6 +1401,10 @@ async function handleTest(message, args) {
         if (sub === 'loadtest' || !sub) {
             const results = await runLoadTestFlow(testChannel);
             await postResultsEmbed(testChannel, results, 'Load Test');
+        }
+        if (sub === 'minecraft' || !sub) {
+            const results = await runMinecraftFlow(testChannel);
+            await postResultsEmbed(testChannel, results, 'Minecraft React-for-DM');
         }
 
         // Direct reset — bypass handleReset's confirmation flow
@@ -1371,6 +1480,11 @@ async function runTestSuite(flow) {
         if (!flow || flow === 'loadtest') {
             const results = await runLoadTestFlow(testChannel);
             await postResultsEmbed(testChannel, results, 'Load Test');
+            allResults.push(...results);
+        }
+        if (!flow || flow === 'minecraft') {
+            const results = await runMinecraftFlow(testChannel);
+            await postResultsEmbed(testChannel, results, 'Minecraft React-for-DM');
             allResults.push(...results);
         }
 

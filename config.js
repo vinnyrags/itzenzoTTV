@@ -70,6 +70,16 @@ export default {
         MOMENTS: '1493307443084787984',
         SHIPPING_LABELS: '1496219727801094359',
         TEST_SUITE: '1494372353172443237',
+        MINECRAFT: optional('DISCORD_MINECRAFT_CHANNEL_ID'),
+    },
+
+    // Minecraft realm invites — react-for-DM in #minecraft (see commands/minecraft.js).
+    // Each value is the full text DM'd to the user when they react. Free-form so you
+    // can store an IP, a realm code, a join URL, or a multiline instruction block.
+    MINECRAFT_INVITES: {
+        java: optional('MINECRAFT_JAVA_INVITE'),
+        bedrock_horror: optional('MINECRAFT_BEDROCK_HORROR_INVITE'),
+        bedrock_creative: optional('MINECRAFT_BEDROCK_CREATIVE_INVITE'),
     },
 
     SHIPPING: {

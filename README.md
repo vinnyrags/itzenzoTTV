@@ -1,6 +1,6 @@
 # Nous
 
-Discord bot for the itzenzoTTV trading card business. Powers order notifications, pack battles, card shop listings, queue management, livestream flow, Stripe payment integration, and community engagement mechanics.
+Discord bot for the itzenzoTTV trading card business. Powers order notifications, pack battles, card shop listings, queue management, livestream flow, Stripe payment integration, the `#minecraft` react-for-invite hub, and community engagement mechanics.
 
 Named after the Aeon of Erudition from Honkai: Star Rail.
 
@@ -33,6 +33,8 @@ Key variables:
 - `STRIPE_SECRET_KEY`, `STRIPE_BOT_WEBHOOK_SECRET` — payments and webhook verification
 - `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, `TWITCH_WEBHOOK_SECRET`, `TWITCH_BROADCASTER_ID` — stream online/offline events
 - `SHIPPINGEASY_API_KEY`, `SHIPPINGEASY_API_SECRET` — order/shipment sync
+- `DISCORD_MINECRAFT_CHANNEL_ID` — channel ID for the react-for-invite embed
+- `MINECRAFT_JAVA_INVITE`, `MINECRAFT_BEDROCK_HORROR_INVITE`, `MINECRAFT_BEDROCK_CREATIVE_INVITE` — DM payload sent to a user when they react with the matching emoji (free-form text — IP, realm code, multi-line instructions)
 - `BOT_PORT` — Express webhook server port (default 3100)
 - `SHOP_URL`, `SITE_URL`, `LIVESTREAM_SECRET` — public URLs and livestream toggle secret
 
@@ -50,7 +52,7 @@ Key variables:
 | `community-goals.js` | Community goal tracking and progress updates |
 | `livestream-flow.js` | Card night flow orchestration — queue open, battles, duck races, stream end |
 | `notify-deploy.js` | Deploy status notifications to `#dev-log` |
-| `commands/` | Message command handlers (`!sell`, `!battle`, `!queue`, etc.) |
+| `commands/` | Message command handlers (`!sell`, `!battle`, `!queue`, etc.) plus auto-managed channel embeds (`welcome.js`, `minecraft.js`) |
 | `webhooks/` | Stripe and Twitch webhook handlers |
 | `alerts/` | New-product alerts and channel messaging |
 | `scripts/` | Operational scripts (see below) |

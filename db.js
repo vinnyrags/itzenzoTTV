@@ -271,6 +271,12 @@ db.exec(`
         channel_message_id TEXT
     );
     INSERT OR IGNORE INTO welcome_config (id) VALUES (1);
+
+    CREATE TABLE IF NOT EXISTS minecraft_config (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        channel_message_id TEXT
+    );
+    INSERT OR IGNORE INTO minecraft_config (id) VALUES (1);
 `);
 
 // Add list_session_id column to card_listings (v9)
@@ -963,6 +969,11 @@ const welcomeStmts = {
     setMessageId: db.prepare('UPDATE welcome_config SET channel_message_id = ? WHERE id = 1'),
 };
 
+const minecraftStmts = {
+    getConfig: db.prepare('SELECT * FROM minecraft_config WHERE id = 1'),
+    setMessageId: db.prepare('UPDATE minecraft_config SET channel_message_id = ? WHERE id = 1'),
+};
+
 export {
     db,
     stmts as purchases,
@@ -979,6 +990,7 @@ export {
     shippingStmts as shipping,
     discordLinkStmts as discordLinks,
     welcomeStmts as welcome,
+    minecraftStmts as minecraft,
     pullEntryStmts as pullEntries,
     trackingStmts as tracking,
 };

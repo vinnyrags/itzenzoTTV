@@ -161,6 +161,12 @@ export function createTestDb() {
         );
         INSERT OR IGNORE INTO welcome_config (id) VALUES (1);
 
+        CREATE TABLE IF NOT EXISTS minecraft_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            channel_message_id TEXT
+        );
+        INSERT OR IGNORE INTO minecraft_config (id) VALUES (1);
+
         CREATE TABLE IF NOT EXISTS pull_entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             listing_id INTEGER NOT NULL,
@@ -352,6 +358,10 @@ export function buildStmts(db) {
         welcome: {
             getConfig: db.prepare('SELECT * FROM welcome_config WHERE id = 1'),
             setMessageId: db.prepare('UPDATE welcome_config SET channel_message_id = ? WHERE id = 1'),
+        },
+        minecraft: {
+            getConfig: db.prepare('SELECT * FROM minecraft_config WHERE id = 1'),
+            setMessageId: db.prepare('UPDATE minecraft_config SET channel_message_id = ? WHERE id = 1'),
         },
         pullEntries: {
             addEntry: db.prepare('INSERT INTO pull_entries (listing_id, discord_user_id, customer_email, quantity) VALUES (?, ?, ?, ?)'),

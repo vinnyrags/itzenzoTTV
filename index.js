@@ -55,6 +55,7 @@ import { handleShipments } from './commands/shipments.js';
 import { syncBotCommands } from './sync-bot-commands.js';
 import { initCommunityGoals } from './community-goals.js';
 import { initWelcome } from './commands/welcome.js';
+import { initMinecraftChannel, handleMinecraftReaction } from './commands/minecraft.js';
 const PREFIX = '!';
 
 // =========================================================================
@@ -204,14 +205,22 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // =========================================================================
-// Reaction handler — giveaway entries
+// Reaction handler — Minecraft react-for-DM invites
 // =========================================================================
 
-// Reaction handler — kept for future use (giveaways now use buttons)
 client.on('messageReactionAdd', async (reaction, user) => {
     if (user.bot) return;
     if (reaction.partial) {
         try { await reaction.fetch(); } catch { return; }
+    }
+    if (user.partial) {
+        try { await user.fetch(); } catch { return; }
+    }
+
+    try {
+        await handleMinecraftReaction(reaction, user);
+    } catch (e) {
+        console.error('Error handling messageReactionAdd:', e.message);
     }
 });
 
@@ -234,6 +243,9 @@ client.once('ready', async () => {
 
     // Initialize welcome embed in #welcome
     await initWelcome();
+
+    // Initialize the persistent #minecraft react-for-DM embed
+    await initMinecraftChannel();
 
     // Initialize giveaways (close expired, schedule active timers)
     initGiveaways();

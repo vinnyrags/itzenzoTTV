@@ -282,6 +282,25 @@ const messages = [
         color: 0xceff00,
     },
 
+    // Message: Minecraft Realms
+    {
+        title: '🟢 Minecraft Realms — React-for-DM Invites',
+        description: [
+            (process.env.DISCORD_MINECRAFT_CHANNEL_ID ? `<#${process.env.DISCORD_MINECRAFT_CHANNEL_ID}>` : '`#minecraft`') + ' is bot-managed. A persistent embed pinned by Nous lists three realms with reaction emojis:',
+            '',
+            '> 🪓 — **Java Hardcore Survival** (whitelist required)',
+            '> 👻 — **Bedrock Horror Survival**',
+            '> 🎨 — **Bedrock Creative**',
+            '',
+            'React with the corresponding emoji and the bot DMs you the realm invite. Your reaction is then removed so you can re-react later if you need the invite again. Realm codes / IPs never appear in the channel — they live in the bot\'s env.',
+            '',
+            '**Don\'t edit the embed manually** — Nous re-syncs it on startup. To change the realm list, update `commands/minecraft.js`.',
+            '',
+            '*If your DMs are closed, the bot can\'t deliver. Open them via Server → Privacy Settings → "Direct Messages from server members" and react again. General gaming chat lives in #general-gaming, not here.*',
+        ].join('\n'),
+        color: 0xceff00,
+    },
+
     // Message: Test Suite
     {
         title: '🧪 Test Suite',
@@ -297,6 +316,8 @@ const messages = [
             '**`!test shipping`** — ShippingEasy integration (9 steps: address storage → SE order → webhook tracking → shipments commands → dropped-off with tracking).',
             '',
             '**`!test loadtest`** — Concurrency verification (4 steps: 10 rapid concurrent purchases → dedup check → purchase count integrity → concurrent read verification).',
+            '',
+            '**`!test minecraft`** — Minecraft react-for-DM (8 steps: init posts embed + 3 reactions → idempotency → each emoji handler → wrong-message / wrong-emoji / bot-user guards).',
             '',
             '*Uses @rhapttv test account. Simulates buyer interactions via direct handler calls. Stripe must be in test mode.*',
         ].join('\n'),

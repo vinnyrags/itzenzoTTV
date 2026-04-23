@@ -2,7 +2,7 @@
  * Discord client setup and helpers.
  */
 
-import { Client, GatewayIntentBits, EmbedBuilder } from 'discord.js';
+import { Client, GatewayIntentBits, EmbedBuilder, Partials } from 'discord.js';
 import config from './config.js';
 
 const client = new Client({
@@ -15,6 +15,10 @@ const client = new Client({
         GatewayIntentBits.DirectMessages,
         GatewayIntentBits.DirectMessageReactions,
     ],
+    // Required to receive reactionAdd events on messages cached before the
+    // bot started (or after a restart). The persistent #minecraft embed
+    // outlives the bot process, so without partials those reactions silently drop.
+    partials: [Partials.Message, Partials.Reaction, Partials.User],
 });
 
 // Channel overrides for test mode — redirects output to #test-suite
