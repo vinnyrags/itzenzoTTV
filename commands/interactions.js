@@ -24,6 +24,12 @@ import { purchases, cardListings, listSessions, battles, giveaways } from '../db
 import { startExpiryTimer, clearListingTtl, updateListingEmbed, updateListSessionEmbed } from './card-shop.js';
 import { handleGiveawayEntry } from './giveaway.js';
 import {
+    handleJavaWhitelistButton,
+    handleJavaWhitelistSubmit,
+    JAVA_WHITELIST_BUTTON_ID,
+    JAVA_WHITELIST_MODAL_ID,
+} from './minecraft.js';
+import {
     hasShippingCoveredByDiscordId,
     hasShippingCovered,
     getShippingLabel,
@@ -68,6 +74,10 @@ async function handleButtonInteraction(interaction) {
         return handleWelcomeLink(interaction);
     }
 
+    if (customId === JAVA_WHITELIST_BUTTON_ID) {
+        return handleJavaWhitelistButton(interaction);
+    }
+
     if (customId.startsWith('giveaway-enter-')) {
         const giveawayId = Number(customId.replace('giveaway-enter-', ''));
         return handleGiveawayButton(interaction, giveawayId);
@@ -88,6 +98,11 @@ async function handleModalSubmit(interaction) {
         }
 
         return handleGiveawayEntry(interaction, giveawayId, tiktokUsername);
+    }
+
+    // Minecraft Java whitelist modal
+    if (interaction.customId === JAVA_WHITELIST_MODAL_ID) {
+        return handleJavaWhitelistSubmit(interaction);
     }
 
     // Email linking modal (welcome channel)

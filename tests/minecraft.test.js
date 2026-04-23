@@ -1,16 +1,16 @@
 /**
  * Tests for the Minecraft react-for-DM module — emoji map, invite lookup,
- * and the reaction handler's guards (bot user, wrong message, wrong emoji,
- * missing invite env var).
+ * the reaction handler's guards, and the Java whitelist button + modal flow.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('../config.js', () => ({
     default: {
-        CHANNELS: { MINECRAFT: 'mc_channel_id' },
+        CHANNELS: { MINECRAFT: 'mc_channel_id', OPS: 'ops_channel_id' },
+        ROLES: { AKIVILI: 'akivili_role_id' },
         MINECRAFT_INVITES: {
-            java: 'Server IP: java.example.com — DM Vincent your username for whitelist.',
+            java: 'Java Hardcore Survival is whitelist-only. Click below to submit your username.',
             bedrock_horror: 'Realm code: HORROR-1234',
             bedrock_creative: null, // intentionally unconfigured
         },
@@ -20,7 +20,11 @@ vi.mock('../config.js', () => ({
 const dmSend = vi.fn().mockResolvedValue(null);
 const createDM = vi.fn().mockResolvedValue({ send: dmSend });
 const getMember = vi.fn().mockResolvedValue({ createDM });
-const getChannel = vi.fn();
+const opsSend = vi.fn().mockResolvedValue(null);
+const getChannel = vi.fn((key) => {
+    if (key === 'OPS') return { send: opsSend };
+    return null;
+});
 
 vi.mock('../discord.js', () => ({
     getChannel: (...args) => getChannel(...args),
@@ -39,9 +43,15 @@ vi.mock('../db.js', () => ({
 const {
     REALM_BY_EMOJI,
     REACTION_EMOJIS,
+    JAVA_WHITELIST_BUTTON_ID,
+    JAVA_WHITELIST_MODAL_ID,
+    JAVA_USERNAME_INPUT_ID,
     getInviteForRealm,
     handleMinecraftReaction,
+    handleJavaWhitelistButton,
+    handleJavaWhitelistSubmit,
     buildMinecraftEmbed,
+    buildJavaWhitelistButtonRow,
 } = await import('../commands/minecraft.js');
 
 const STORED_MESSAGE_ID = 'msg_abc_123';
@@ -87,8 +97,8 @@ describe('REALM_BY_EMOJI', () => {
 // =========================================================================
 
 describe('getInviteForRealm', () => {
-    it('returns the configured Java invite', () => {
-        expect(getInviteForRealm('java')).toMatch(/java\.example\.com/);
+    it('returns the configured Java intro', () => {
+        expect(getInviteForRealm('java')).toMatch(/whitelist/i);
     });
 
     it('returns the configured Bedrock Horror code', () => {
@@ -105,7 +115,7 @@ describe('getInviteForRealm', () => {
 });
 
 // =========================================================================
-// Embed
+// Embed + button builders
 // =========================================================================
 
 describe('buildMinecraftEmbed', () => {
@@ -124,8 +134,18 @@ describe('buildMinecraftEmbed', () => {
     });
 });
 
+describe('buildJavaWhitelistButtonRow', () => {
+    it('renders one primary button with the whitelist custom ID', () => {
+        const row = buildJavaWhitelistButtonRow();
+        const json = row.toJSON();
+        expect(json.components).toHaveLength(1);
+        expect(json.components[0].custom_id).toBe(JAVA_WHITELIST_BUTTON_ID);
+        expect(json.components[0].style).toBe(1); // ButtonStyle.Primary
+    });
+});
+
 // =========================================================================
-// handleMinecraftReaction guards
+// handleMinecraftReaction guards + DM payloads
 // =========================================================================
 
 describe('handleMinecraftReaction', () => {
@@ -174,26 +194,32 @@ describe('handleMinecraftReaction', () => {
         expect(dmSend).not.toHaveBeenCalled();
     });
 
-    it('DMs the Java invite when 🪓 is reacted', async () => {
+    it('DMs the Java intro + whitelist button when 🪓 is reacted', async () => {
         const reaction = makeReaction('🪓');
         await handleMinecraftReaction(reaction, makeUser());
 
-        expect(getMember).toHaveBeenCalledWith('user_123');
-        expect(createDM).toHaveBeenCalled();
         expect(dmSend).toHaveBeenCalledTimes(1);
         const payload = dmSend.mock.calls[0][0];
-        const embedJson = payload.embeds[0].toJSON();
-        expect(embedJson.description).toMatch(/java\.example\.com/);
+
+        // Intro embed
+        expect(payload.embeds).toHaveLength(1);
+        expect(payload.embeds[0].toJSON().description).toMatch(/whitelist/i);
+
+        // Button component
+        expect(payload.components).toHaveLength(1);
+        const buttons = payload.components[0].toJSON().components;
+        expect(buttons[0].custom_id).toBe(JAVA_WHITELIST_BUTTON_ID);
+
         expect(reaction.users.remove).toHaveBeenCalledWith('user_123');
     });
 
-    it('DMs the Bedrock Horror code when 👻 is reacted', async () => {
+    it('DMs the Bedrock Horror code (no button) when 👻 is reacted', async () => {
         const reaction = makeReaction('👻');
         await handleMinecraftReaction(reaction, makeUser());
 
         const payload = dmSend.mock.calls[0][0];
-        const embedJson = payload.embeds[0].toJSON();
-        expect(embedJson.description).toBe('Realm code: HORROR-1234');
+        expect(payload.embeds[0].toJSON().description).toBe('Realm code: HORROR-1234');
+        expect(payload.components).toBeUndefined();
         expect(reaction.users.remove).toHaveBeenCalled();
     });
 
@@ -210,7 +236,6 @@ describe('handleMinecraftReaction', () => {
         const reaction = makeReaction('🪓');
         await expect(handleMinecraftReaction(reaction, makeUser())).resolves.toBeUndefined();
         expect(dmSend).not.toHaveBeenCalled();
-        // Reaction still removed so the embed stays clean
         expect(reaction.users.remove).toHaveBeenCalled();
     });
 
@@ -218,7 +243,123 @@ describe('handleMinecraftReaction', () => {
         dmSend.mockRejectedValueOnce(new Error('Cannot send messages to this user'));
         const reaction = makeReaction('🪓');
         await expect(handleMinecraftReaction(reaction, makeUser())).resolves.toBeUndefined();
-        // Reaction still removed
         expect(reaction.users.remove).toHaveBeenCalled();
+    });
+});
+
+// =========================================================================
+// Java whitelist button
+// =========================================================================
+
+describe('handleJavaWhitelistButton', () => {
+    it('opens a modal with a username text input', async () => {
+        const showModal = vi.fn().mockResolvedValue(null);
+        const interaction = { showModal };
+
+        await handleJavaWhitelistButton(interaction);
+
+        expect(showModal).toHaveBeenCalledTimes(1);
+        const modal = showModal.mock.calls[0][0];
+        const json = modal.toJSON();
+        expect(json.custom_id).toBe(JAVA_WHITELIST_MODAL_ID);
+
+        const textInput = json.components[0].components[0];
+        expect(textInput.custom_id).toBe(JAVA_USERNAME_INPUT_ID);
+        expect(textInput.min_length).toBe(3);
+        expect(textInput.max_length).toBe(16);
+        expect(textInput.required).toBe(true);
+    });
+});
+
+// =========================================================================
+// Java whitelist modal submit
+// =========================================================================
+
+describe('handleJavaWhitelistSubmit', () => {
+    function makeInteraction(username, userOverrides = {}) {
+        return {
+            user: { id: 'user_abc', tag: 'buyer#0', ...userOverrides },
+            fields: {
+                getTextInputValue: vi.fn().mockReturnValue(username),
+            },
+            reply: vi.fn().mockResolvedValue(null),
+        };
+    }
+
+    it('posts the request to #ops with AKIVILI mention on a valid username', async () => {
+        const interaction = makeInteraction('itzenzoTTV');
+        await handleJavaWhitelistSubmit(interaction);
+
+        expect(opsSend).toHaveBeenCalledTimes(1);
+        const args = opsSend.mock.calls[0][0];
+        expect(args.content).toBe('<@&akivili_role_id>');
+        const embedJson = args.embeds[0].toJSON();
+        expect(embedJson.description).toContain('<@user_abc>');
+        expect(embedJson.description).toContain('buyer#0');
+        expect(embedJson.description).toContain('`itzenzoTTV`');
+
+        expect(interaction.reply).toHaveBeenCalledTimes(1);
+        const reply = interaction.reply.mock.calls[0][0];
+        expect(reply.ephemeral).toBe(true);
+        expect(reply.content).toContain('`itzenzoTTV`');
+    });
+
+    it('strips a leading @ from the username before validation', async () => {
+        const interaction = makeInteraction('@itzenzoTTV');
+        await handleJavaWhitelistSubmit(interaction);
+
+        expect(opsSend).toHaveBeenCalled();
+        const embedJson = opsSend.mock.calls[0][0].embeds[0].toJSON();
+        expect(embedJson.description).toContain('`itzenzoTTV`');
+    });
+
+    it('rejects invalid characters with an ephemeral reply (no ops post)', async () => {
+        const interaction = makeInteraction('bad username!');
+        await handleJavaWhitelistSubmit(interaction);
+
+        expect(opsSend).not.toHaveBeenCalled();
+        expect(interaction.reply).toHaveBeenCalledWith(
+            expect.objectContaining({
+                content: expect.stringMatching(/doesn't look like a valid/i),
+                ephemeral: true,
+            }),
+        );
+    });
+
+    it('rejects usernames shorter than 3 characters', async () => {
+        const interaction = makeInteraction('ab');
+        await handleJavaWhitelistSubmit(interaction);
+
+        expect(opsSend).not.toHaveBeenCalled();
+        expect(interaction.reply).toHaveBeenCalledWith(
+            expect.objectContaining({ ephemeral: true }),
+        );
+    });
+
+    it('rejects usernames longer than 16 characters', async () => {
+        const interaction = makeInteraction('a'.repeat(17));
+        await handleJavaWhitelistSubmit(interaction);
+
+        expect(opsSend).not.toHaveBeenCalled();
+    });
+
+    it('still replies to the user even if #ops is missing', async () => {
+        // Temporarily make getChannel('OPS') return null
+        getChannel.mockImplementationOnce((key) => null);
+        const interaction = makeInteraction('validName');
+        await handleJavaWhitelistSubmit(interaction);
+
+        expect(opsSend).not.toHaveBeenCalled();
+        expect(interaction.reply).toHaveBeenCalledTimes(1);
+        const reply = interaction.reply.mock.calls[0][0];
+        expect(reply.ephemeral).toBe(true);
+    });
+
+    it('still replies to the user even if the ops post fails', async () => {
+        opsSend.mockRejectedValueOnce(new Error('channel gone'));
+        const interaction = makeInteraction('validName');
+        await handleJavaWhitelistSubmit(interaction);
+
+        expect(interaction.reply).toHaveBeenCalledTimes(1);
     });
 });
