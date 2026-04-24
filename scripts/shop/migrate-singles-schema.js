@@ -46,7 +46,7 @@ const NEW_HEADERS = [
     'Game',                       // M
     'Language',                   // N
     'Image URL',                  // O
-    'Release Year',               // P
+    'Release Date',               // P
     'Artist',                     // Q
     'Pokemon TCG API ID',         // R
     'Stripe Product ID',          // S

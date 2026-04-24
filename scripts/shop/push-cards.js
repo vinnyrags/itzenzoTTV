@@ -19,7 +19,7 @@
  *   D Price Charting       N Language
  *   E Price (authoritative → Stripe default_price)
  *   F Stock                O Image URL
- *   G Sale Price (opt)     P Release Year
+ *   G Sale Price (opt)     P Release Date (YYYY-MM-DD)
  *   H Card Number          Q Artist
  *   I Set Name             R Pokemon TCG API ID
  *   J Set Code             S Stripe Product ID (writeback)
@@ -153,7 +153,7 @@ async function main() {
         const game = (row[COL.M] || 'pokemon').trim();
         const language = (row[COL.N] || 'English').trim();
         const imageUrl = (row[COL.O] || '').trim();
-        const releaseYear = (row[COL.P] || '').trim();
+        const releaseDate = (row[COL.P] || '').trim();
         const artist = (row[COL.Q] || '').trim();
         const tcgApiId = (row[COL.R] || '').trim();
         const existingProductId = (row[COL.S] || '').trim();
@@ -194,7 +194,7 @@ async function main() {
         if (rarity) metadata.rarity = rarity;
         if (game) metadata.game = game;
         if (language) metadata.language = language;
-        if (releaseYear) metadata.release_year = releaseYear;
+        if (releaseDate) metadata.release_date = releaseDate;
         if (artist) metadata.artist = artist;
         if (tcgApiId) metadata.tcg_api_id = tcgApiId;
         // Reference prices — kept on Stripe for operator context, not used at checkout.

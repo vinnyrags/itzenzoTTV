@@ -51,7 +51,7 @@ const COL = {
     K: 10, // Variant
     L: 11, // Rarity
     O: 14, // Image URL
-    P: 15, // Release Year
+    P: 15, // Release Date (YYYY-MM-DD)
     Q: 16, // Artist
     R: 17, // Pokemon TCG API ID
     T: 19, // Notes
@@ -466,7 +466,11 @@ async function main() {
         const apiSetId = match.set?.id || '';
         const apiRarity = normalizeRarity(match.rarity);
         const apiImage = match.images?.large || match.images?.small || '';
-        const apiYear = match.set?.releaseDate ? match.set.releaseDate.slice(0, 4) : '';
+        // Full release date (YYYY-MM-DD) so the frontend sort stays
+        // chronologically ordered within a single release year.
+        const apiReleaseDate = match.set?.releaseDate
+            ? match.set.releaseDate.replace(/\//g, '-')
+            : '';
         const apiArtist = match.artist || '';
         const apiCardId = match.id || '';
 
@@ -478,7 +482,7 @@ async function main() {
         if (!(row[COL.J] || '').trim() && apiSetId) writes.J = apiSetId;
         if ((FORCE || !rarity) && apiRarity) writes.L = apiRarity;
         if ((FORCE || !image) && apiImage) writes.O = apiImage;
-        if ((FORCE || !year) && apiYear) writes.P = apiYear;
+        if ((FORCE || !year) && apiReleaseDate) writes.P = apiReleaseDate;
         if ((FORCE || !artist) && apiArtist) writes.Q = apiArtist;
         if ((FORCE || !apiId) && apiCardId) writes.R = apiCardId;
 
@@ -494,7 +498,7 @@ async function main() {
         const summary = [
             writes.I ? `set="${writes.I}"` : null,
             writes.L ? `rarity=${writes.L}` : null,
-            writes.P ? `year=${writes.P}` : null,
+            writes.P ? `date=${writes.P}` : null,
             writes.Q ? `artist="${writes.Q}"` : null,
         ].filter(Boolean).join(' ');
         const apiIdDisplay = apiCardId || '—';
@@ -530,6 +534,14 @@ async function main() {
         console.log(`\n[dry-run] No changes written.`);
         return;
     }
+
+    // Keep column P's header in sync with what we're writing — the
+    // migration originally titled it "Release Year" but we now write
+    // full YYYY-MM-DD dates.
+    updates.push({
+        range: `${SHEET_NAME}!P1`,
+        values: [['Release Date']],
+    });
 
     if (!updates.length) {
         console.log('\nNothing to write.');
