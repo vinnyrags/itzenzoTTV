@@ -14,7 +14,7 @@ const messages = [
     {
         title: '💳 How Payments & Shipping Work',
         description: [
-            'We sell sealed TCG product (Pokemon, anime, and more) through the shop at **itzenzo.tv**, plus raw Near Mint singles in our [card catalog](https://itzenzo.tv/cards).',
+            'We sell sealed TCG product (Pokemon, anime, and more) through the shop at **itzenzo.tv**, plus hand-inspected raw singles in our [card catalog](https://itzenzo.tv/cards) — condition shown right on the listing.',
             '',
             'Here\'s exactly how everything works — buying, shipping, refunds, and what to expect at every step.',
             '',
@@ -50,7 +50,7 @@ const messages = [
             'Graded cards, vintage one-offs, and anything outside the main catalog get listed in `#card-shop` as embeds with Buy Now buttons. Click to check out — a reservation locks the card to you for 30 minutes while you complete the purchase. If you don\'t finish in time, the card is released back to the shop for the next buyer.',
             '',
             '**Raw singles catalog**',
-            'Browse the full Near Mint catalog at [itzenzo.tv/cards](https://itzenzo.tv/cards). Every card is hand-inspected and ready to ship. Not sure about a card? Hit **Request to See** and we\'ll feature it on stream so you can see edges, surface, and holo shift in real time — no commitment.',
+            'Browse the catalog at [itzenzo.tv/cards](https://itzenzo.tv/cards). Every card is hand-inspected, with condition (NM, LP, MP, HP, DMG) shown in the corner of the listing. Not sure about a card? Hit **Request to See** and we\'ll feature it on stream so you can see edges, surface, and holo shift in real time — no commitment.',
         ].join('\n'),
         color: 0xceff00,
     },
