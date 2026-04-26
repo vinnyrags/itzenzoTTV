@@ -72,7 +72,7 @@ export default {
         TEST_SUITE: '1494372353172443237',
         MINECRAFT: optional('DISCORD_MINECRAFT_CHANNEL_ID'),
         LOOKING_FOR_GROUP: '1488041106519232574',
-        HOW_IT_WORKS: optional('DISCORD_HOW_IT_WORKS_CHANNEL_ID'),
+        HOW_IT_WORKS: '1489138364463448195',
     },
 
     // Minecraft realm invites — react-for-DM in #minecraft (see commands/minecraft.js).
