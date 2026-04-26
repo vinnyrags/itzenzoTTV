@@ -311,6 +311,7 @@ try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_state TEXT DEFAULT NULL
 try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_postal_code TEXT DEFAULT NULL`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE purchases ADD COLUMN shipping_country TEXT DEFAULT NULL`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE purchases ADD COLUMN shippingeasy_order_id TEXT DEFAULT NULL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE purchases ADD COLUMN shippingeasy_canceled_at TEXT DEFAULT NULL`); } catch { /* exists */ }
 
 // =========================================================================
 // Purchases
@@ -378,10 +379,15 @@ const stmts = {
         UPDATE purchases SET shippingeasy_order_id = ? WHERE stripe_session_id = ?
     `),
 
+    markShippingEasyCanceled: db.prepare(`
+        UPDATE purchases SET shippingeasy_canceled_at = datetime('now') WHERE stripe_session_id = ?
+    `),
+
     getPendingShipments: db.prepare(`
         SELECT p.* FROM purchases p
         WHERE p.shippingeasy_order_id IS NOT NULL
           AND p.shipped_at IS NULL
+          AND p.shippingeasy_canceled_at IS NULL
           AND p.shipping_address IS NOT NULL
           AND NOT EXISTS (SELECT 1 FROM tracking t WHERE t.customer_email = p.customer_email AND t.created_at >= p.created_at)
     `),
@@ -392,6 +398,7 @@ const stmts = {
         JOIN tracking t ON t.customer_email = p.customer_email AND t.created_at >= p.created_at
         WHERE p.shippingeasy_order_id IS NOT NULL
           AND p.shipped_at IS NULL
+          AND p.shippingeasy_canceled_at IS NULL
     `),
 
     getShipmentsByDiscordId: db.prepare(`

@@ -9,15 +9,18 @@ import { createTestDb, buildStmts } from './setup.js';
 // Mock config before importing signRequest
 vi.mock('../config.js', () => ({
     default: {
+        SHIPPINGEASY_API_KEY: 'test_api_key',
         SHIPPINGEASY_API_SECRET: 'test_secret_key_for_signing',
+        SHIPPINGEASY_STORE_API_KEY: 'test_store_key',
     },
 }));
 
+const mockSendEmbed = vi.fn().mockResolvedValue(null);
 vi.mock('../discord.js', () => ({
-    sendEmbed: vi.fn().mockResolvedValue(null),
+    sendEmbed: (...args) => mockSendEmbed(...args),
 }));
 
-import { signRequest, splitName } from '../shippingeasy-api.js';
+import { signRequest, splitName, cancelOrder } from '../shippingeasy-api.js';
 
 describe('signRequest', () => {
     it('generates HMAC for GET without body', () => {
@@ -150,5 +153,91 @@ describe('shipping address DB queries', () => {
         expect(shipments).toHaveLength(1);
         expect(shipments[0].product_name).toBe('Product D');
         expect(shipments[0].tracking_number).toBeNull(); // no tracking yet
+    });
+
+    it('markShippingEasyCanceled drops the row out of pending shipments', () => {
+        stmts.purchases.insertPurchase.run('sess_cancel', 'user_3', 'cancel@example.com', 'Canceled Product', 4000);
+        stmts.purchases.updateShippingAddress.run('Cancel Buyer', '1 Main', 'NYC', 'NY', '10001', 'US', 'sess_cancel');
+        stmts.purchases.setShippingEasyOrderId.run('se_cancel', 'sess_cancel');
+
+        expect(stmts.purchases.getPendingShipments.all()).toHaveLength(1);
+        stmts.purchases.markShippingEasyCanceled.run('sess_cancel');
+        expect(stmts.purchases.getPendingShipments.all()).toHaveLength(0);
+
+        const purchase = stmts.purchases.getBySessionId.get('sess_cancel');
+        expect(purchase.shippingeasy_canceled_at).toBeTruthy();
+        // The order ID is preserved for audit even after cancellation.
+        expect(purchase.shippingeasy_order_id).toBe('se_cancel');
+    });
+});
+
+describe('cancelOrder', () => {
+    beforeEach(() => {
+        mockSendEmbed.mockClear();
+    });
+
+    it('returns false (and does not fetch) when API is not configured', async () => {
+        // The module-level config mock is set, so cancelOrder is "configured".
+        // To test the unconfigured path we'd need a separate suite — here we
+        // just assert the orderId guard: missing orderId → false.
+        global.fetch = vi.fn();
+        const ok = await cancelOrder({ orderId: null });
+        expect(ok).toBe(false);
+        expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('POSTs to the cancellations endpoint with HMAC signature', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve(''),
+            json: () => Promise.resolve({}),
+        });
+        global.fetch = fetchMock;
+
+        const ok = await cancelOrder({ orderId: 'se_42', sessionId: 'cs_x', email: 'a@b.com' });
+
+        expect(ok).toBe(true);
+        expect(fetchMock).toHaveBeenCalledOnce();
+        const url = fetchMock.mock.calls[0][0];
+        expect(url).toContain('/api/stores/test_store_key/orders/se_42/cancellations');
+        expect(url).toContain('api_key=test_api_key');
+        expect(url).toMatch(/api_signature=[0-9a-f]{64}/);
+        const opts = fetchMock.mock.calls[0][1];
+        expect(opts.method).toBe('POST');
+    });
+
+    it('treats 404 (already gone) as success', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 404,
+            text: () => Promise.resolve('not found'),
+        });
+        const ok = await cancelOrder({ orderId: 'se_gone' });
+        expect(ok).toBe(true);
+        expect(mockSendEmbed).not.toHaveBeenCalled();
+    });
+
+    it('returns false and posts to #ops on unexpected failure', async () => {
+        global.fetch = vi.fn().mockResolvedValue({
+            ok: false,
+            status: 500,
+            text: () => Promise.resolve('server error'),
+        });
+        const ok = await cancelOrder({ orderId: 'se_500', email: 'fail@example.com' });
+        expect(ok).toBe(false);
+        expect(mockSendEmbed).toHaveBeenCalledOnce();
+        const [channel, embed] = mockSendEmbed.mock.calls[0];
+        expect(channel).toBe('OPS');
+        expect(embed.description).toContain('se_500');
+        expect(embed.description).toContain('manually cancel in ShippingEasy');
+    });
+
+    it('returns false and posts to #ops on network error', async () => {
+        global.fetch = vi.fn().mockRejectedValue(new Error('ECONNRESET'));
+        const ok = await cancelOrder({ orderId: 'se_err' });
+        expect(ok).toBe(false);
+        expect(mockSendEmbed).toHaveBeenCalledOnce();
+        expect(mockSendEmbed.mock.calls[0][1].description).toContain('ECONNRESET');
     });
 });

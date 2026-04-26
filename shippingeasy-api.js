@@ -129,4 +129,70 @@ async function createOrder({ stripeSessionId, customerName, email, address, line
     }
 }
 
-export { signRequest, splitName, createOrder };
+/**
+ * Cancel an unshipped ShippingEasy order.
+ *
+ * Used when a Stripe refund is issued for a physical order that has not
+ * shipped yet — kills the order so it does not get printed and shipped.
+ *
+ * Resilient: never throws. Returns `true` on success (HTTP 200/204) or when
+ * the order is already gone (404). Returns `false` for unexpected failures
+ * and posts to #ops so the operator knows manual cleanup may be needed.
+ */
+async function cancelOrder({ orderId, sessionId = null, email = null }) {
+    if (!config.SHIPPINGEASY_API_KEY || !config.SHIPPINGEASY_API_SECRET || !config.SHIPPINGEASY_STORE_API_KEY) {
+        console.log('ShippingEasy API not configured — skipping order cancellation');
+        return false;
+    }
+
+    if (!orderId) return false;
+
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const path = `/api/stores/${config.SHIPPINGEASY_STORE_API_KEY}/orders/${orderId}/cancellations`;
+    const params = {
+        api_key: config.SHIPPINGEASY_API_KEY,
+        api_timestamp: timestamp,
+    };
+    const body = JSON.stringify({});
+    const signature = signRequest('POST', path, params, body);
+    const sortedParams = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&');
+    const url = `https://app.shippingeasy.com${path}?${sortedParams}&api_signature=${signature}`;
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+        });
+
+        if (response.ok) {
+            console.log(`ShippingEasy order canceled: ${orderId}${sessionId ? ` (session ${sessionId})` : ''}`);
+            return true;
+        }
+
+        // 404 means the order is already gone — treat as success so we mark canceled in our DB.
+        if (response.status === 404) {
+            console.log(`ShippingEasy order ${orderId} already gone (404) — treating as canceled`);
+            return true;
+        }
+
+        const errorText = await response.text();
+        console.error(`ShippingEasy order cancellation failed: ${response.status} — ${errorText}`);
+        await sendEmbed('OPS', {
+            title: '⚠️ ShippingEasy Cancel Failed',
+            description: `Could not cancel order **${orderId}**${email ? ` for **${email}**` : ''}. The Stripe refund went through — manually cancel in ShippingEasy.\n\n**Error:** ${response.status} — ${errorText.slice(0, 200)}`,
+            color: 0xff0000,
+        }).catch(() => {});
+        return false;
+    } catch (e) {
+        console.error('ShippingEasy order cancellation error:', e.message);
+        await sendEmbed('OPS', {
+            title: '⚠️ ShippingEasy Cancel Error',
+            description: `Failed to cancel order **${orderId}**${email ? ` for **${email}**` : ''}. The Stripe refund went through — manually cancel in ShippingEasy.\n\n**Error:** ${e.message}`,
+            color: 0xff0000,
+        }).catch(() => {});
+        return false;
+    }
+}
+
+export { signRequest, splitName, createOrder, cancelOrder };

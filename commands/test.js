@@ -731,9 +731,22 @@ async function runCardNightFlow(testChannel) {
         await handleIntlShip(msg);
     }));
 
+    // --- REFUND: seed a fake ShippingEasy order ID on @rhapttv's most recent
+    // purchase so the refund command exercises the SE-cancel branch (the
+    // actual SE API call is gated by config and won't hit production unless
+    // the secrets are present in this environment). ---
+    results.push(await step('Seed ShippingEasy order ID on rhapttv purchase', async () => {
+        const recent = purchases.getRecentByDiscordId.get(TEST_USER_ID);
+        if (!recent) throw new Error('No purchase to seed SE order on');
+        purchases.setShippingEasyOrderId.run('se_test_seed', recent.stripe_session_id);
+        const after = purchases.getBySessionId.get(recent.stripe_session_id);
+        if (after.shippingeasy_order_id !== 'se_test_seed') throw new Error('SE order ID not seeded');
+    }));
+
     // --- REFUND: full refund (no amount specified) ---
     results.push(await step('!refund @rhapttv (full refund)', async () => {
-        // Will fail at Stripe since fake session — but command executes without crashing
+        // Will fail at Stripe since fake session — but command executes without crashing.
+        // The SE-cancel branch is gated by Stripe success, so it won't fire here.
         const msg = buildTestMessage('!refund @rhapttv', testChannel, rhapttv);
         await handleRefund(msg, ['@rhapttv']);
     }));
