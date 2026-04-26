@@ -99,7 +99,7 @@ const messages = [
             '',
             '**Full policy:** [itzenzo.tv/how-it-works/refund-policy](https://itzenzo.tv/how-it-works/refund-policy)',
             '',
-            '_How to ask: DM the shop owner directly, open a ticket in #start-here, or reply to your Stripe receipt email — all routes end up in the same place._',
+            '_How to ask: DM the shop owner directly, or reply to your Stripe receipt email — both routes reach me._',
         ].join('\n'),
         color: 0xceff00,
     },
