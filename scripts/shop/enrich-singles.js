@@ -41,6 +41,14 @@ const LIMIT_ARG = process.argv.find((a) => a.startsWith('--limit='));
 const LIMIT = LIMIT_ARG ? parseInt(LIMIT_ARG.split('=')[1], 10) : Infinity;
 const ROW_ARG = process.argv.find((a) => a.startsWith('--row='));
 const ONLY_ROW = ROW_ARG ? parseInt(ROW_ARG.split('=')[1], 10) : null;
+// Process only rows that have a variant marker in column K (Full Art,
+// Secret, Alternate Art, etc.). Useful for targeted re-runs after a
+// scorer change that affects variant disambiguation.
+const VARIANTS_ONLY = process.argv.includes('--variants-only');
+// Process only rows where column H carries a letter-prefixed number
+// (SWSH076, XY69, SM213). These signal promos and are sensitive to the
+// letter-prefix matching rule in scoreCandidate.
+const PREFIX_ONLY = process.argv.includes('--prefix-only');
 
 // Column indices for the A-T schema.
 const COL = {
@@ -135,6 +143,7 @@ function normalizeNumber(number) {
 function stripParensFromName(name) {
     let cleaned = name;
     let embeddedNumber = null;
+    const variantParts = [];
     while (true) {
         const m = /^(.+?)\s*\(([^)]+)\)\s*$/.exec(cleaned);
         if (!m) break;
@@ -142,9 +151,17 @@ function stripParensFromName(name) {
         // Detect number inside parens (e.g. "146 Full Art", "176")
         const numMatch = /^(\d+)(?:\s+.+)?$/.exec(inner);
         if (numMatch && !embeddedNumber) embeddedNumber = numMatch[1];
+        // Capture non-numeric paren content as a variant hint (e.g. "Full Art",
+        // "Alternate Art Secret", "Rainbow Rare"). Strip leading number if any.
+        const variantText = inner.replace(/^\d+\s*/, '').trim();
+        if (variantText) variantParts.push(variantText);
         cleaned = m[1].trim();
     }
-    return { name: cleaned, embeddedNumber };
+    return {
+        name: cleaned,
+        embeddedNumber,
+        variantText: variantParts.join(' '),
+    };
 }
 
 /**
@@ -166,6 +183,22 @@ function nameVariants(name) {
 }
 
 /**
+ * Strip the subset qualifier from a "Parent: Subset" hint for API
+ * lookup. The Pokemon TCG API stores subset cards (Radiant Collection,
+ * Shiny Vault, Trainer Gallery, etc.) under the parent set's name; the
+ * subset itself is encoded in the card's number prefix. So
+ * "Generations: Radiant Collection" → query "Generations".
+ *
+ * The subset hint stays in setHint for scoring (drives the
+ * SUBSET_PREFIXES match in scoreCandidate).
+ */
+function setNameForQuery(setHint) {
+    if (!setHint) return '';
+    const m = /^([A-Z][a-zA-Z\s]+?):\s*.+$/.exec(setHint);
+    return m ? m[1].trim() : setHint;
+}
+
+/**
  * Build a Pokemon TCG API query. Prefers name + stripped number + set name.
  */
 function buildQuery(name, number, setHint) {
@@ -178,8 +211,8 @@ function buildQuery(name, number, setHint) {
     }
 
     if (setHint) {
-        // Use the distinctive part of the set hint (trim trailing " Promos" etc.)
-        const safeSet = setHint.replace(/"/g, '\\"');
+        const querySetName = setNameForQuery(setHint);
+        const safeSet = querySetName.replace(/"/g, '\\"');
         parts.push(`set.name:"${safeSet}"`);
     }
 
@@ -256,7 +289,7 @@ function normalizeName(s) {
         .trim();
 }
 
-function scoreCandidate(candidate, { name, number, setHint, setCode }) {
+function scoreCandidate(candidate, { name, number, setHint, setCode, variant }) {
     let score = 0;
 
     const apiName = normalizeName(candidate.name);
@@ -284,6 +317,20 @@ function scoreCandidate(candidate, { name, number, setHint, setCode }) {
             const apiStripped = apiNum.replace(/^[a-z]+/, '');
             if (userStripped && apiStripped && userStripped === apiStripped) score += 40;
             else if (userNum.includes('/') && userNum.split('/')[0] === apiNum) score += 40;
+        }
+
+        // Letter prefix on the number is a near-certain promo signal —
+        // "SWSH076", "XY69", "SM213" tell us the card lives in a Black
+        // Star Promos / similar promo set, not in the same-named main
+        // set. Reward candidates that share the prefix; penalize ones
+        // that don't, otherwise the set-name token overlap (e.g. user's
+        // "SWSH: Sword & Shield Promo Cards" matching the *main* "Sword
+        // & Shield" set) outscores the correct promo match.
+        const userPrefix = (userNum.match(/^[a-z]+/i) || [''])[0];
+        const apiPrefix = (apiNum.match(/^[a-z]+/i) || [''])[0];
+        if (userPrefix) {
+            if (apiPrefix === userPrefix) score += 60;
+            else score -= 60;
         }
     }
 
@@ -313,6 +360,57 @@ function scoreCandidate(candidate, { name, number, setHint, setCode }) {
         const userCodeLower = setCode.toLowerCase().trim();
         if (apiSetId === userCodeLower) score += 50;
         else if (apiSetId.startsWith(userCodeLower) || userCodeLower.startsWith(apiSetId)) score += 25;
+    }
+
+    // Sub-set prefix awareness. Several sets contain in-pack mini-sets
+    // numbered with a letter prefix (Radiant Collection in Generations →
+    // RC1–RC32, Shiny Vault in Hidden Fates → SV-, Trainer Gallery →
+    // TG-, Galarian Gallery → GG-). When the user names the sub-set in
+    // their hint, the matching API card carries the prefix in its number
+    // — that's a stronger signal than rarity for these collections,
+    // since many sub-set cards are full-art treatments of otherwise
+    // common/holo printings (e.g. Pikachu RC29 is rarity "Rare Holo"
+    // but is in fact the Full Art treatment).
+    const SUBSET_PREFIXES = [
+        { hint: /radiant\s*collection/i, prefix: 'RC' },
+        { hint: /shiny\s*vault/i, prefix: 'SV' },
+        { hint: /trainer\s*gallery/i, prefix: 'TG' },
+        { hint: /galarian\s*gallery/i, prefix: 'GG' },
+    ];
+    if (setHint) {
+        for (const { hint, prefix } of SUBSET_PREFIXES) {
+            if (hint.test(setHint)) {
+                const apiNum = (candidate.number || '').toUpperCase();
+                if (apiNum.startsWith(prefix)) score += 70;
+                else score -= 20;
+                break;
+            }
+        }
+    }
+
+    // Variant-aware scoring. Without this, Full Art / Secret / Alt Art
+    // listings collide with their plain-holo siblings within the same set
+    // (e.g. BREAKpoint Darkrai EX has both #74 holo and #118 Full Art —
+    // identical name + set tokens, scorer picks the lower number by
+    // tiebreaker). Match the user's variant hint against the API rarity.
+    if (variant) {
+        const v = variant.toLowerCase();
+        const apiRarity = (candidate.rarity || '').toLowerCase();
+
+        const wantsArt = /full\s*art|alternate\s*art|alt\s*art/.test(v);
+        const wantsSecret = /secret|rainbow|gold/.test(v);
+        const wantsIllustration = /illustration/.test(v);
+
+        if (wantsArt) {
+            if (/ultra|secret|illustration|hyper|rainbow/.test(apiRarity)) score += 60;
+            else if (/holo/.test(apiRarity) && !/ultra/.test(apiRarity)) score -= 30;
+        }
+        if (wantsSecret) {
+            if (/secret|rainbow|hyper|illustration/.test(apiRarity)) score += 60;
+        }
+        if (wantsIllustration) {
+            if (/illustration/.test(apiRarity)) score += 60;
+        }
     }
 
     return score;
@@ -376,8 +474,15 @@ async function main() {
         const rawSetHint = (row[COL.I] || '').trim();
         const setHint = cleanSetHint(rawSetHint);
         const setCode = (row[COL.J] || '').trim();
+        const variantCol = (row[COL.K] || '').trim();
 
         if (!name) continue;
+        if (VARIANTS_ONLY && !(row[COL.K] || '').trim()) continue;
+        if (PREFIX_ONLY) {
+            const h = (row[COL.H] || '').trim();
+            // Match "SWSH076", "XY69", "SM213" — letters followed by digits.
+            if (!/^[a-z]+\d/i.test(h)) continue;
+        }
 
         // Skip fully-enriched rows unless --force
         const rarity = (row[COL.L] || '').trim();
@@ -454,7 +559,10 @@ async function main() {
         }
 
         const candidates = Array.from(allCandidates.values());
-        const ctx = { name: searchName, number: searchNumber, setHint, setCode };
+        // Combine column K (Variant) with any non-numeric paren content from
+        // the card name — both signal the user's intended variant.
+        const variant = [variantCol, cleaned.variantText].filter(Boolean).join(' ');
+        const ctx = { name: searchName, number: searchNumber, setHint, setCode, variant };
         const match = pickBestMatch(candidates, ctx);
         if (!match) {
             logs.noMatch.push({ row: sheetRow, name, number, setHint });
@@ -503,7 +611,11 @@ async function main() {
         ].filter(Boolean).join(' ');
         const apiIdDisplay = apiCardId || '—';
         const apiSetDisplay = apiSetName || '—';
-        console.log(`  Row ${sheetRow}: ${name}${number ? ' #' + number : ''} → [${apiIdDisplay}] ${apiSetDisplay}  |  ${summary}`);
+        const previousApiId = apiId; // captured before any writes
+        const changeMarker = previousApiId && previousApiId !== apiCardId
+            ? ` (was ${previousApiId})`
+            : '';
+        console.log(`  Row ${sheetRow}: ${name}${number ? ' #' + number : ''} → [${apiIdDisplay}]${changeMarker} ${apiSetDisplay}  |  ${summary}`);
     }
 
     console.log(`\n=== Summary ===`);
