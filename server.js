@@ -412,10 +412,17 @@ app.post('/test/run', async (req, res) => {
 
 /**
  * Start the Express server.
+ *
+ * Binds to 127.0.0.1 so the bot is only reachable through nginx on the
+ * production host (nginx proxies /bot/ → http://127.0.0.1:3100/). External
+ * traffic must hit nginx, which terminates TLS and applies any host-level
+ * rate limiting before reaching the bot. Override via BOT_BIND_HOST=0.0.0.0
+ * if a deployment needs the bot exposed directly on all interfaces.
  */
 function startServer() {
-    app.listen(config.PORT, () => {
-        console.log(`Webhook server listening on port ${config.PORT}`);
+    const host = config.BOT_BIND_HOST;
+    app.listen(config.PORT, host, () => {
+        console.log(`Webhook server listening on ${host}:${config.PORT}`);
     });
 }
 
