@@ -221,6 +221,25 @@ async function runCardNightFlow(testChannel) {
         }
     }));
 
+    // Sanity-check the activity-feed webhook so a stream-day smoke test
+    // catches a broken route before the homepage stops getting updates.
+    results.push(await step('Activity feed webhook reachable', async () => {
+        const res = await fetch('http://127.0.0.1:3100/webhooks/activity-changed', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Bot-Secret': config.LIVESTREAM_SECRET,
+            },
+            body: JSON.stringify({
+                event: 'activity.test.probe',
+                data: { kind: 'test.probe', title: 'probe', description: 'smoke test', icon: 'OK', color: 'zinc' },
+            }),
+        });
+        if (res.status !== 200) {
+            throw new Error(`activity-changed returned ${res.status}`);
+        }
+    }));
+
     // --- PRE-STREAM ---
     // Find a real product from Stripe for hype/battle
     let realProductName = 'Prismatic Evolutions Booster Box'; // fallback

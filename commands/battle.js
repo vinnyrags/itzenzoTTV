@@ -17,6 +17,11 @@ import Stripe from 'stripe';
 import config from '../config.js';
 import { db, battles, purchases } from '../db.js';
 import { client, getChannel, sendToChannel, sendEmbed, getMember, addRole, getGuild } from '../discord.js';
+import {
+    broadcastBattleEntry,
+    broadcastBattleFull,
+    broadcastBattleWinner,
+} from '../lib/activity-broadcaster.js';
 import { hasShippingCoveredByDiscordId, getShippingRate, formatShippingRate } from '../shipping.js';
 import * as currentPackBattle from '../lib/wp-current-battle.js';
 
@@ -312,6 +317,8 @@ async function declareBattleWinner(message, args) {
         color: 0xffd700,
     });
 
+    broadcastBattleWinner(`<@${mentioned.id}>`, battle.product_name);
+
     // Check if winner needs shipping — battles don't charge shipping at buy-in
     const isOwner = mentioned.id === (getGuild()?.ownerId);
     const covered = hasShippingCoveredByDiscordId(mentioned.id);
@@ -408,6 +415,11 @@ async function ownerJoinBattle(message) {
 
     if (message.channel.id !== config.CHANNELS.PACK_BATTLES) {
         await message.channel.send(`⚔️ Joined battle — ${paidEntries.length}/${battle.max_entries} entries (stock decremented)`);
+    }
+
+    broadcastBattleEntry(`<@${message.author.id}>`, paidEntries.length, battle.max_entries, battle.product_name);
+    if (paidEntries.length >= battle.max_entries) {
+        broadcastBattleFull(battle.product_name, battle.max_entries);
     }
 }
 

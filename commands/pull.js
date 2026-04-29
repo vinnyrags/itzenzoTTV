@@ -23,6 +23,11 @@ import { cardListings, pullEntries } from '../db.js';
 import * as queueSource from '../lib/queue-source.js';
 import * as wpPullBox from '../lib/wp-pull-box.js';
 import { client, getChannel, sendEmbed } from '../discord.js';
+import {
+    broadcastPullBoxOpened,
+    broadcastPullBoxReplenished,
+    broadcastPullBoxClosed,
+} from '../lib/activity-broadcaster.js';
 import { formatShippingRate } from '../shipping.js';
 
 const TIERS = ['v', 'vmax'];
@@ -106,6 +111,8 @@ async function handlePullOpen(message, args) {
     if (message.channel.id !== channel.id) {
         await message.channel.send(`🎰 ${tier.toUpperCase()}-tier pull box **${name}** ($${(priceCents / 100).toFixed(2)} × ${totalSlots} slots) is live in <#${config.CHANNELS.CARD_SHOP}>!`);
     }
+
+    broadcastPullBoxOpened(box);
 }
 
 /**
@@ -200,6 +207,8 @@ async function handlePullClose(message, args) {
     await refreshBoxEmbed(target.id, { closed: true }).catch(() => {});
 
     await message.channel.send(`🎰 ${target.tier.toUpperCase()}-tier pull box **${target.name}** closed.`);
+
+    broadcastPullBoxClosed(target);
 }
 
 // ===========================================================================
@@ -255,6 +264,8 @@ async function handlePullReplenish(message, args) {
     await refreshBoxEmbed(target.id).catch(() => {});
 
     await message.channel.send(`📈 Added ${amount} slots to **${target.name}** (${target.totalSlots} → ${newTotal}).`);
+
+    broadcastPullBoxReplenished(target, amount, newTotal);
 }
 
 // ===========================================================================

@@ -11,6 +11,7 @@ import { EmbedBuilder } from 'discord.js';
 import { client, getChannel, isChannelOverridden } from './discord.js';
 import config from './config.js';
 import { goals } from './db.js';
+import { broadcastGoalCycleHit, broadcastGoalMilestone } from './lib/activity-broadcaster.js';
 
 const CYCLE_GOAL = 250000; // $2,500 in cents
 const MILESTONE_INCREMENT = 500000; // $5,000 in cents
@@ -110,6 +111,7 @@ async function addRevenue(amountCents) {
     for (let i = milestonesBefore + 1; i <= milestonesAfter; i++) {
         const amount = i * MILESTONE_INCREMENT;
         const label = `$${(amount / 100).toLocaleString('en-US')}`;
+        broadcastGoalMilestone(amount);
         await announceMilestone(label);
     }
 
@@ -148,6 +150,8 @@ async function updatePinnedMessage(goal) {
  * Announce a completed restock cycle in #restock-tracker.
  */
 async function announceRestock(cycleNumber) {
+    broadcastGoalCycleHit(cycleNumber);
+
     const channel = getChannel('COMMUNITY_GOALS');
     if (!channel) return;
 

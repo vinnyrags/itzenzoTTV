@@ -22,6 +22,7 @@ import { recordShipping } from '../shipping.js';
 import { recordPullPurchase, recordPullBoxPurchase } from '../commands/pull.js';
 import * as queueSource from '../lib/queue-source.js';
 import { createOrder } from '../shippingeasy-api.js';
+import { broadcastLowStock, broadcastSoldOut } from '../lib/activity-broadcaster.js';
 
 const stripe = new Stripe(config.STRIPE_SECRET_KEY);
 
@@ -179,6 +180,7 @@ async function handleCheckoutNotifications(session, context) {
                 description: `**${productName}** \u2014 only **${stock}** left in stock!`,
                 color: 0xe74c3c,
             });
+            broadcastLowStock(productName, stock);
         }
         if (stock !== undefined && stock === 0) {
             await sendEmbed('DEALS', {
@@ -186,6 +188,7 @@ async function handleCheckoutNotifications(session, context) {
                 description: `**${productName}** is now sold out!`,
                 color: 0x95a5a6,
             });
+            broadcastSoldOut(productName);
         }
     }
 

@@ -12,6 +12,7 @@ import { EmbedBuilder } from 'discord.js';
 import config from '../config.js';
 import { coupons } from '../db.js';
 import { sendEmbed } from '../discord.js';
+import { broadcastCouponDrop } from '../lib/activity-broadcaster.js';
 
 /**
  * Route !coupon subcommands.
@@ -186,6 +187,8 @@ async function handleActivate(message, code) {
             description: `Use code **\`${code}\`** at checkout for **${displayDiscount}**!`,
             color: 0xceff00,
         });
+
+        broadcastCouponDrop(code, displayDiscount);
 
         await message.channel.send(
             `🏷️ **Coupon activated**: \`${code}\` (${displayDiscount})\n` +

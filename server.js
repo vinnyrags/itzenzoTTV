@@ -159,6 +159,32 @@ app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res)
     }
 });
 
+// =========================================================================
+// Activity feed — display-ready event envelopes (pull-box claims, etc.)
+// fired from WP. Producers in Nous itself (battles, coupons, pull-box
+// lifecycle, low-stock, community goals) call broadcast() directly.
+// =========================================================================
+
+app.post('/webhooks/activity-changed', express.json({ limit: '64kb' }), (req, res) => {
+    const providedSecret = req.get('X-Bot-Secret') || '';
+    if (!config.LIVESTREAM_SECRET || providedSecret !== config.LIVESTREAM_SECRET) {
+        return res.sendStatus(403);
+    }
+
+    const { event, data } = req.body || {};
+    if (typeof event !== 'string' || !event) {
+        return res.sendStatus(400);
+    }
+
+    try {
+        broadcastQueue(event, data ?? {});
+        res.sendStatus(200);
+    } catch (e) {
+        console.error('activity-changed broadcast failed:', e.message);
+        res.sendStatus(500);
+    }
+});
+
 app.get('/queue/stream', (req, res) => {
     res.set({
         'Content-Type':      'text/event-stream',
