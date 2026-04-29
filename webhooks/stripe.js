@@ -607,4 +607,55 @@ async function checkCardSalePayment(session, discordUserId, lineItems = []) {
     console.log(`Card listing #${listingId} sold: ${listing.card_name}`);
 }
 
+/**
+ * Notify WordPress that a Stripe product is no longer purchasable.
+ *
+ * Triggered by product.updated (active true→false), product.deleted,
+ * price.updated (active true→false), and price.deleted webhook events.
+ * WP responds by setting stock=0 on every catalog post that references
+ * the product and clearing the stale stripe_price_id /
+ * stripe_product_id meta — so a buyer never adds an unpurchasable
+ * item to their cart, even with a stale cache.
+ *
+ * Fire-and-forget (we already 200'd Stripe). Logs but doesn't throw on
+ * WP-side failures — the pre-flight check in CreateCheckoutEndpoint is
+ * a backstop.
+ */
+export async function notifyCatalogProductDeactivated(stripeProductId) {
+    if (!stripeProductId || !config.SITE_URL || !config.LIVESTREAM_SECRET) {
+        return;
+    }
+    try {
+        const url = `${config.SITE_URL}/wp-json/shop/v1/catalog/stripe-product-deactivated`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Bot-Secret': config.LIVESTREAM_SECRET,
+            },
+            body: JSON.stringify({ stripeProductId }),
+        });
+        if (!response.ok) {
+            console.error(`catalog-deactivate ${stripeProductId}: WP returned ${response.status}`);
+            return;
+        }
+        const data = await response.json();
+        if (data.matched > 0) {
+            console.log(`catalog-deactivate ${stripeProductId}: cleared ${data.updated}/${data.matched} WP post(s)`);
+        }
+    } catch (e) {
+        console.error(`catalog-deactivate ${stripeProductId}:`, e.message);
+    }
+}
+
+/**
+ * Resolve the stripeProductId from a Stripe price object. Price events
+ * carry the product as a string ID on the price; this is just a typed
+ * accessor so the dispatcher in server.js stays one-liner-clean.
+ */
+export function priceEventProductId(priceObject) {
+    if (!priceObject) return null;
+    return typeof priceObject.product === 'string' ? priceObject.product : (priceObject.product?.id ?? null);
+}
+
 export { handleCheckoutCritical, handleCheckoutNotifications, handleCheckoutCompleted };

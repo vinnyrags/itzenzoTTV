@@ -13,7 +13,13 @@ import express from 'express';
 import Stripe from 'stripe';
 import config from './config.js';
 import { battles, cardListings, purchases, discordLinks } from './db.js';
-import { handleCheckoutCritical, handleCheckoutNotifications, handleCheckoutCompleted } from './webhooks/stripe.js';
+import {
+    handleCheckoutCritical,
+    handleCheckoutNotifications,
+    handleCheckoutCompleted,
+    notifyCatalogProductDeactivated,
+    priceEventProductId,
+} from './webhooks/stripe.js';
 import { handleTwitchWebhook } from './webhooks/twitch.js';
 import { handleShippingEasyWebhook } from './webhooks/shippingeasy.js';
 import { handleCardRequestCritical, handleCardRequestNotifications } from './webhooks/card-request.js';
@@ -81,6 +87,57 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
                 if (context) {
                     handleCheckoutNotifications(event.data.object, context).catch(e =>
                         console.error('Notification error:', e.message)
+                    );
+                }
+                return;
+            }
+            // Catalog drift: when Stripe drops a product (or its price)
+            // out of "purchasable" state, push that into WP immediately
+            // so a stale cart never reaches Stripe checkout. 200 first,
+            // then fire-and-forget the WP notify so a slow WP can't
+            // delay our Stripe response.
+            case 'product.updated': {
+                const product = event.data.object;
+                const wasActive = event.data.previous_attributes?.active;
+                res.sendStatus(200);
+                if (product?.active === false && wasActive === true) {
+                    notifyCatalogProductDeactivated(product.id).catch(e =>
+                        console.error('catalog notify error:', e.message)
+                    );
+                }
+                return;
+            }
+            case 'product.deleted': {
+                const product = event.data.object;
+                res.sendStatus(200);
+                if (product?.id) {
+                    notifyCatalogProductDeactivated(product.id).catch(e =>
+                        console.error('catalog notify error:', e.message)
+                    );
+                }
+                return;
+            }
+            case 'price.updated': {
+                const price = event.data.object;
+                const wasActive = event.data.previous_attributes?.active;
+                res.sendStatus(200);
+                if (price?.active === false && wasActive === true) {
+                    const productId = priceEventProductId(price);
+                    if (productId) {
+                        notifyCatalogProductDeactivated(productId).catch(e =>
+                            console.error('catalog notify error:', e.message)
+                        );
+                    }
+                }
+                return;
+            }
+            case 'price.deleted': {
+                const price = event.data.object;
+                res.sendStatus(200);
+                const productId = priceEventProductId(price);
+                if (productId) {
+                    notifyCatalogProductDeactivated(productId).catch(e =>
+                        console.error('catalog notify error:', e.message)
                     );
                 }
                 return;
