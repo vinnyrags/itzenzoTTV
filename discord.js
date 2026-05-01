@@ -4,6 +4,7 @@
 
 import { Client, GatewayIntentBits, EmbedBuilder, Partials } from 'discord.js';
 import config from './config.js';
+import { discordThrottle } from './lib/discord-throttle.js';
 
 const client = new Client({
     intents: [
@@ -64,6 +65,14 @@ async function sendToChannel(key, content) {
 
 /**
  * Send an embed to a channel by config key.
+ *
+ * Wrapped in the discordThrottle so a webhook burst (e.g. 50 checkouts
+ * completing inside 5 seconds during a hot drop) doesn't queue thousands
+ * of pending API calls while discord.js's internal rate-limit retries
+ * spin. The throttle bounds concurrent ops to DISCORD_OPS_CONCURRENCY
+ * (default 5) and drops with logging when the backlog exceeds
+ * DISCORD_OPS_BACKLOG_LIMIT (default 200) — degraded mode fails fast
+ * and visibly rather than hanging the event loop.
  */
 async function sendEmbed(key, { title, description, color = 0xceff00, fields = [], footer = null }) {
     const embed = new EmbedBuilder()
@@ -74,7 +83,7 @@ async function sendEmbed(key, { title, description, color = 0xceff00, fields = [
     if (fields.length) embed.addFields(fields);
     if (footer) embed.setFooter({ text: footer });
 
-    return sendToChannel(key, { embeds: [embed] });
+    return discordThrottle(() => sendToChannel(key, { embeds: [embed] }));
 }
 
 /**
