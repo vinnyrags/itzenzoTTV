@@ -49,7 +49,15 @@ const APPLY = args.includes('--apply');
 const JSON_OUT = args.includes('--json');
 const REMOTE_ARG = args.find((a) => a.startsWith('--remote='));
 const REMOTE = REMOTE_ARG ? REMOTE_ARG.split('=')[1] : 'root@174.138.70.29';
+// Pass --remote=local (or --local) when running on the box itself so
+// wp-cli runs in-process instead of looping back through SSH.
+const LOCAL = args.includes('--local') || REMOTE === 'local' || REMOTE === 'localhost';
 const WP_PATH = '/var/www/vincentragosta.io';
+
+function wpCommand(wpArgs) {
+    const wpInvocation = `cd ${WP_PATH} && wp ${wpArgs} --allow-root --skip-themes`;
+    return LOCAL ? wpInvocation : `ssh ${REMOTE} "${wpInvocation.replace(/"/g, '\\"')}"`;
+}
 
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || (() => {
     const envFile = path.join(__dirname, '../../wp-config-env.php');
@@ -111,12 +119,12 @@ function findWpReferences(stripeProductIds) {
           AND pm_pid.meta_value IN (${inClause})
     `.trim().replace(/\s+/g, ' ');
 
-    const cmd = `ssh ${REMOTE} "cd ${WP_PATH} && wp db query \\"${sql.replace(/"/g, '\\"')}\\" --allow-root --skip-themes"`;
+    const cmd = wpCommand(`db query "${sql.replace(/"/g, '\\"')}"`);
     let raw;
     try {
         raw = execSync(cmd, { encoding: 'utf8' });
     } catch (e) {
-        console.error('SSH/WP-CLI query failed:', e.message);
+        console.error('WP-CLI query failed:', e.message);
         process.exit(2);
     }
 
@@ -141,12 +149,11 @@ function applyFixes(refs) {
             // Set stock=0, clear stale stripe_price_id and stripe_product_id.
             // We keep the post around (publish/draft is the user's call) so
             // the URL doesn't 404 — cart simply can't add it again.
-            const sets = [
-                `wp post meta update ${id} stock_quantity 0`,
-                `wp post meta delete ${id} stripe_price_id`,
-                `wp post meta delete ${id} stripe_product_id`,
-            ].join(' && ');
-            execSync(`ssh ${REMOTE} "cd ${WP_PATH} && ${sets} --allow-root --skip-themes" 2>&1`, { encoding: 'utf8' });
+            // Three writes per post — keep them sequential so a failure
+            // on one doesn't masquerade as success.
+            execSync(wpCommand(`post meta update ${id} stock_quantity 0`), { encoding: 'utf8', stdio: 'pipe' });
+            execSync(wpCommand(`post meta delete ${id} stripe_price_id`), { encoding: 'utf8', stdio: 'pipe' });
+            execSync(wpCommand(`post meta delete ${id} stripe_product_id`), { encoding: 'utf8', stdio: 'pipe' });
             updated++;
         } catch (e) {
             console.error(`  Failed to fix post ${id}:`, e.message);
