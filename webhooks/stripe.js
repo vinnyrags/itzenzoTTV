@@ -520,10 +520,10 @@ async function checkBattlePayment(session, discordUserId) {
     try {
         const activeQueue = await queueSource.getActiveQueue();
         if (activeQueue) {
-            await queueSource.addEntry({
+            const result = await queueSource.addEntry({
                 queueId: activeQueue.id,
                 discordUserId: discordUserId || null,
-                customerEmail: session.customer_details?.email || null,
+                customerEmail: normalizeEmail(session.customer_details?.email),
                 productName: battle.product_name,
                 quantity: 1,
                 stripeSessionId: session.id,
@@ -533,6 +533,20 @@ async function checkBattlePayment(session, discordUserId) {
                 detailLabel: battle.product_name,
                 detailData: { battleId: battle.id, format: battle.format || null },
             });
+            // Closed-session race during a pack-battle payment.
+            if (result?.closedSession) {
+                await sendEmbed('OPS', {
+                    title: '⚠️ Closed-Session Race — Pack Battle',
+                    description: [
+                        `**Buyer:** ${discordUserId ? `<@${discordUserId}>` : (session.customer_details?.email || 'unknown')}`,
+                        `**Battle:** ${battle.product_name}`,
+                        `**Stripe session:** \`${session.id}\``,
+                        '',
+                        'Battle entry was paid but the queue session was closed before the queue mirror could land. Battle row exists; manual queue insert into the next session if needed.',
+                    ].join('\n'),
+                    color: 0xe67e22,
+                });
+            }
         }
     } catch (e) {
         console.error('Failed to mirror pack-battle entry to queue:', e.message);

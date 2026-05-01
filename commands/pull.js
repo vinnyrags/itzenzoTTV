@@ -501,7 +501,7 @@ async function recordPullBoxPurchase({
     try {
         const activeQueue = await queueSource.getActiveQueue();
         if (activeQueue) {
-            await queueSource.addEntry({
+            const result = await queueSource.addEntry({
                 queueId: activeQueue.id,
                 discordUserId,
                 discordHandle,
@@ -518,6 +518,19 @@ async function recordPullBoxPurchase({
                     slots: claimedSlotNumbers,
                 },
             });
+            if (result?.closedSession) {
+                await sendEmbed('OPS', {
+                    title: '⚠️ Closed-Session Race — Pull Box',
+                    description: [
+                        `**Buyer:** ${discordUserId ? `<@${discordUserId}>` : (customerEmail || 'unknown')}`,
+                        `**Pull box:** ${pullBoxId} (slots ${claimedSlotNumbers.join(', ')})`,
+                        `**Stripe session:** \`${stripeSessionId}\``,
+                        '',
+                        'Pull-box buy was paid but the queue session was closed before the queue mirror could land. Slot rows are confirmed; manual queue insert if needed.',
+                    ].join('\n'),
+                    color: 0xe67e22,
+                });
+            }
         }
     } catch (e) {
         console.error('Failed to mirror pull-box buy to queue:', e.message);

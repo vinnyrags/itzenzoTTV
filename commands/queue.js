@@ -665,7 +665,7 @@ async function addToQueue({ discordUserId, discordHandle = null, customerEmail, 
         ? normalized[0].name
         : normalized.map((item) => `${item.quantity}x ${item.name}`).join(', ');
 
-    await queueSource.addEntry({
+    const result = await queueSource.addEntry({
         queueId: active.id,
         discordUserId,
         discordHandle,
@@ -679,6 +679,25 @@ async function addToQueue({ discordUserId, discordHandle = null, customerEmail, 
         detailLabel,
         detailData: { items: normalized, totalQuantity },
     });
+
+    // Closed-session race: admin closed the queue between getActiveQueue
+    // above and the entry insert. Buyer paid, but we have no live queue
+    // to put them in. Surface to #ops so a human can decide refund vs.
+    // manual queue insert; fall through and don't update the channel embed.
+    if (result?.closedSession) {
+        await sendEmbed('OPS', {
+            title: '⚠️ Closed-Session Race — Manual Triage',
+            description: [
+                `**Buyer:** ${discordUserId ? `<@${discordUserId}>` : (customerEmail || 'unknown')}`,
+                `**Items:** ${detailLabel}`,
+                `**Stripe session:** \`${stripeSessionId || 'unknown'}\``,
+                '',
+                'The queue session was closed between the bot check and the entry insert. The buyer has paid but there is no live queue to land in. Decide: manual queue insert into the next session, or refund.',
+            ].join('\n'),
+            color: 0xe67e22,
+        });
+        return false;
+    }
 
     // Update the real-time #queue channel embed
     await updateQueueChannelEmbed(active.id);
