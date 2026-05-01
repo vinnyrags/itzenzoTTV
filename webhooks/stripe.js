@@ -95,19 +95,26 @@ async function handleCheckoutCritical(session) {
         }
     }
 
-    // Record each purchase
+    // Record each purchase. INSERT OR IGNORE on stripe_session_id makes
+    // the inserts idempotent across Stripe webhook retries; we count actual
+    // inserts so the role-threshold counter only ticks up when at least
+    // one new purchase row landed (otherwise a retry would over-promote
+    // the buyer through the Xipe / Long thresholds).
+    let actuallyInserted = 0;
     for (const item of lineItems) {
-        purchases.insertPurchase.run(
+        const result = purchases.insertPurchase.run(
             session.id,
             discordUserId,
             customerEmail,
             item.name || 'Unknown Product',
             totalAmount
         );
+        actuallyInserted += result.changes;
     }
 
-    // Increment purchase count for role promotion tracking
-    if (discordUserId) {
+    // Increment purchase count for role promotion tracking — only when this
+    // webhook delivery actually created new purchase rows.
+    if (discordUserId && actuallyInserted > 0) {
         purchases.incrementPurchaseCount.run(discordUserId);
     }
 

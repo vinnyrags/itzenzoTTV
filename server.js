@@ -12,7 +12,7 @@
 import express from 'express';
 import Stripe from 'stripe';
 import config from './config.js';
-import { battles, cardListings, purchases, discordLinks } from './db.js';
+import { battles, cardListings, purchases, discordLinks, stripeEvents } from './db.js';
 import {
     handleCheckoutCritical,
     handleCheckoutNotifications,
@@ -74,6 +74,19 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
         }
     } else {
         event = JSON.parse(req.body);
+    }
+
+    // Belt-and-suspenders: dedup on event.id even before we hit any handler.
+    // Stripe re-delivers events on non-2xx OR connection-timeout, and we
+    // already 2xx fast — but a slow phase-1 in handleCheckoutCritical
+    // could race with a retry. INSERT OR IGNORE makes the first delivery
+    // win; subsequent retries short-circuit with a clean 200.
+    if (event?.id) {
+        const claimed = stripeEvents.claimEvent.run(event.id);
+        if (claimed.changes === 0) {
+            console.log(`Stripe event ${event.id} already processed — skipping`);
+            return res.sendStatus(200);
+        }
     }
 
     try {
