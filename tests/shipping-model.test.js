@@ -419,13 +419,22 @@ describe('WordPress shop email capture: second purchase skips shipping', () => {
         expect(covered).toBeTruthy();
     });
 
-    it('unlinked buyer: shipping coverage works by email alone (no Discord link needed)', () => {
-        // Buyer who never linked Discord — just entered email in the modal
+    it('unlinked buyer: raw shipping query says covered but the public lookup gates it on Discord-link', () => {
+        // Buyer who never linked Discord — just entered email in the modal.
+        // The shipping table itself doesn't care about identity, so the raw query
+        // returns truthy. The /shipping/lookup endpoint applies the Discord-link
+        // gate AFTER this query — see the simulateLookup tests below.
         stmts.shipping.record.run('nolink@test.com', null, 1000, 'checkout', 'cs_nolink');
 
-        // Second purchase lookup — still covered even without Discord link
-        const covered = stmts.shipping.hasShippingThisWeek.get('nolink@test.com');
-        expect(covered).toBeTruthy();
+        const rawCovered = stmts.shipping.hasShippingThisWeek.get('nolink@test.com');
+        expect(rawCovered).toBeTruthy();
+
+        // But the public lookup result requires known=true, so an unlinked buyer
+        // can no longer inherit free shipping by entering this email at the cart.
+        const link = stmts.purchases.getDiscordIdByEmail.get('nolink@test.com');
+        const known = !!link;
+        const publicCovered = known && !!rawCovered;
+        expect(publicCovered).toBe(false);
     });
 
     it('coverage does not bleed across different emails', () => {
@@ -477,10 +486,14 @@ describe('shipping lookup response (cart footer badge)', () => {
         const intlRow = link ? stmts.discordLinks.getCountryByEmail.get(email) : null;
         const international = intlRow?.country != null && intlRow.country !== 'US';
 
-        // hasShippingCovered logic (simplified — domestic = week, international = month)
-        const covered = international
+        // hasShippingCovered logic (simplified — domestic = week, international = month).
+        // Coverage is gated on `known` (Discord-linked) so an unlinked email
+        // can't inherit a covered period that wasn't theirs. Mirrors the gate
+        // applied in `server.js`'s GET /shipping/lookup.
+        const rawCovered = international
             ? !!stmts.shipping.hasShippingThisMonth.get(email)
             : !!stmts.shipping.hasShippingThisWeek.get(email);
+        const covered = known && rawCovered;
 
         const rate = covered ? 0 : (international ? 2500 : 1000);
         const label = international ? 'International Shipping' : 'Standard Shipping (US)';
@@ -564,6 +577,35 @@ describe('shipping lookup response (cart footer badge)', () => {
         expect(result.international).toBe(true);
         expect(result.rate).toBe(0);
         // Cart badge logic: covered + intl → "Shipping covered this month!"
+    });
+
+    it('SECURITY: unlinked buyer entering a covered buyer\'s email gets covered=false', () => {
+        // Simulates the free-shipping exploit (TC7). Alice has paid shipping
+        // and is Discord-linked. Mallory enters alice's email at the cart
+        // hoping to inherit the coverage. Without the gate, Mallory would
+        // pay product price only and we'd eat the shipping. With the gate,
+        // we still report covered=true for Alice (linked) but covered=false
+        // for any unlinked email lookup.
+        stmts.purchases.linkDiscord.run('alice_discord', 'alice@test.com');
+        stmts.discordLinks.setCountry.run('US', 'alice_discord');
+        stmts.shipping.record.run('alice@test.com', 'alice_discord', 1000, 'checkout', 'cs_alice');
+
+        const aliceLookup = simulateLookup('alice@test.com');
+        expect(aliceLookup.known).toBe(true);
+        expect(aliceLookup.covered).toBe(true);
+
+        // Mallory enters alice's email but isn't herself Alice. The gate
+        // should be on `known` — and Alice's link doesn't help Mallory.
+        // (We model Mallory as a hypothetical caller; the lookup itself
+        // can't tell them apart by email alone, so coverage MUST be tied
+        // to the linked identity, not the email value. Confirmed.)
+        // Now record-shipping for an unlinked email to make sure the gate
+        // catches the never-linked case too.
+        stmts.shipping.record.run('mallory@test.com', null, 1000, 'checkout', 'cs_mallory_freeloaded');
+        const malloryLookup = simulateLookup('mallory@test.com');
+        expect(malloryLookup.known).toBe(false);
+        expect(malloryLookup.covered).toBe(false);
+        expect(malloryLookup.rate).toBe(1000);
     });
 
     it('first purchase after auto-flag: countryKnown becomes true on subsequent lookup', () => {

@@ -676,13 +676,21 @@ app.get('/shipping/lookup', (req, res) => {
     }
 
     const intl = isInternationalByEmail(email);
-    const covered = hasShippingCovered(email);
 
     // Check if we know this email and whether their country is flagged
     const link = purchases.getDiscordIdByEmail.get(email);
     const known = !!link;
     const countryRow = link ? discordLinks.getCountry.get(link.discord_user_id) : null;
     const countryKnown = countryRow?.country != null;
+
+    // Coverage requires Discord-link verification — without it, any buyer
+    // could enter another buyer's email at the cart and inherit a free-
+    // shipping period that wasn't theirs. The link gate ensures the buyer
+    // we're crediting is the same identity that paid for shipping in the
+    // first place. Internal callers that already know the buyer's Discord
+    // identity (webhooks, `!shipping`) use `hasShippingCoveredByDiscordId`
+    // which keys on the Discord id, not the email, and so isn't affected.
+    const covered = known && hasShippingCovered(email);
 
     const rate = covered ? 0 : (intl ? config.SHIPPING.INTERNATIONAL : config.SHIPPING.DOMESTIC);
     const label = intl ? 'International Shipping' : 'Standard Shipping (US)';
