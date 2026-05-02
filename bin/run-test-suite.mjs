@@ -4,14 +4,13 @@
  *
  * Drives the Nous test flows from the command line against the dedicated
  * test Discord guild (itzenzoTTV (Test)). Embeds land in real channels
- * (#order-feed, #queue, #pack-battles, etc.) — there's no #test-suite
- * funnel because the test guild itself is the funnel.
+ * (#order-feed, #queue, #pack-battles, etc.) and the test orchestration
+ * narration lands in #ops.
  *
  * Usage:
  *   node bin/run-test-suite.mjs                    — runs every flow
  *   node bin/run-test-suite.mjs card-night         — runs a single flow
- *   node bin/run-test-suite.mjs --funnel           — funnel embeds to #test-suite
- *                                                    (legacy behavior, parity with `!test`)
+ *   node bin/run-test-suite.mjs --dry-run          — verify connection only
  *
  * Flow names: card-night, giveaway, race, shipping, loadtest, minecraft
  *
@@ -128,7 +127,6 @@ console.log(`> Mapped ${Object.keys(newChannels).length} channels, ${Object.keys
 // ---------------------------------------------------------------------------
 const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const flow = args[0] || null; // null = all
-const useFunnel = process.argv.includes('--funnel');
 const dryRun = process.argv.includes('--dry-run');
 
 if (dryRun) {
@@ -141,16 +139,13 @@ if (dryRun) {
 const { runTestSuite } = await import('../commands/test.js');
 
 console.log('');
-console.log(`> Running flow: ${flow || 'ALL'}${useFunnel ? '  (funneling embeds to #test-suite)' : '  (real channels, no funnel)'}`);
+console.log(`> Running flow: ${flow || 'ALL'}`);
 console.log('');
 
 const startedAt = Date.now();
 let exitCode = 0;
 try {
-    await runTestSuite(flow, {
-        useChannelOverrides: useFunnel,
-        resultsChannel: useFunnel ? 'TEST_SUITE' : 'OPS',
-    });
+    await runTestSuite(flow, { resultsChannel: 'OPS' });
     console.log('');
     console.log(`> Suite finished in ${Math.round((Date.now() - startedAt) / 1000)}s.`);
 } catch (e) {

@@ -49,7 +49,6 @@ import { handlePull } from './commands/pull.js';
 import { handleReset } from './commands/reset.js';
 import { handleSpin } from './commands/spin.js';
 import { handleCapture } from './commands/capture.js';
-import { handleTest } from './commands/test.js';
 import { handleTracking } from './commands/tracking.js';
 import { handleShipments } from './commands/shipments.js';
 import { syncBotCommands } from './sync-bot-commands.js';
@@ -163,9 +162,6 @@ client.on('messageCreate', async (message) => {
                 break;
             case 'ship-status':
                 await handleShipments(message, ['status', ...args]);
-                break;
-            case 'test':
-                await handleTest(message, args);
                 break;
             case 'requests':
                 await handleRequests(message, args);

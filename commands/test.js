@@ -1,14 +1,12 @@
 /**
- * Test Suite — live critical path testing in #test-suite.
+ * Critical-path test orchestration. Run via `npm run test:critical`
+ * (see bin/run-test-suite.mjs) — connects via the test bot, drives the
+ * flows below against the test guild, and posts embeds to real channels.
  *
- * Commands:
- *   !test              — Run both flows (card night + giveaway)
- *   !test card-night   — Run card night flow only
- *   !test giveaway     — Run giveaway & spin flow only
+ * Flows: card-night, giveaway, race, shipping, loadtest, minecraft.
  *
- * All output routes to #test-suite via channel overrides.
- * Uses @rhapttv test account for buyer interactions.
- * Ends with !reset to clean all data.
+ * Uses @rhapttv test account for buyer interactions. Ends with a table
+ * wipe to clean all data.
  */
 
 import { EmbedBuilder } from 'discord.js';
@@ -18,7 +16,7 @@ import config from '../config.js';
 import { db, purchases, cardListings, listSessions, battles, giveaways, discordLinks, goals, tracking } from '../db.js';
 import * as queueSource from '../lib/queue-source.js';
 import * as wpPullBox from '../lib/wp-pull-box.js';
-import { client, getChannel, setChannelOverride, clearChannelOverrides, getMember } from '../discord.js';
+import { client, getChannel, getMember } from '../discord.js';
 import { handleSell, handleList, handleSold } from './card-shop.js';
 import { handlePull } from './pull.js';
 import { handleBattle } from './battle.js';
@@ -44,14 +42,6 @@ import { initMinecraftChannel, handleMinecraftReaction, REACTION_EMOJIS } from '
 
 const TEST_USER_ID = '1490206350943191052'; // @rhapttv
 const TEST_EMAIL = 'itzenzottv+testaccount1@gmail.com';
-const TEST_CHANNEL_ID = config.CHANNELS.TEST_SUITE;
-
-// Channels to override during test
-const OVERRIDE_KEYS = [
-    'CARD_SHOP', 'ORDER_FEED', 'DEALS', 'QUEUE', 'GIVEAWAYS',
-    'ANNOUNCEMENTS', 'ANALYTICS', 'MOMENTS', 'OPS', 'PACK_BATTLES',
-    'COMMUNITY_GOALS', 'SHIPPING_LABELS', 'MINECRAFT',
-];
 
 // =========================================================================
 // Builders
@@ -150,25 +140,6 @@ function fakeCheckoutSession({ listingId, name, price, withDiscord = true, stock
 // =========================================================================
 // Channel cleanup — delete all messages in #test-suite before starting
 // =========================================================================
-
-async function clearTestChannel(testChannel) {
-    try {
-        let fetched;
-        do {
-            fetched = await testChannel.messages.fetch({ limit: 100 });
-            if (fetched.size > 0) {
-                await testChannel.bulkDelete(fetched, true);
-                // bulkDelete can't delete messages older than 14 days — delete individually
-                const tooOld = fetched.filter(m => Date.now() - m.createdTimestamp >= 14 * 24 * 60 * 60 * 1000);
-                for (const m of tooOld.values()) {
-                    try { await m.delete(); } catch { /* ok */ }
-                }
-            }
-        } while (fetched.size >= 2);
-    } catch (e) {
-        console.error('Failed to clear test channel:', e.message);
-    }
-}
 
 // =========================================================================
 // Step runner
@@ -1510,98 +1481,8 @@ async function postResultsEmbed(testChannel, results, flowName) {
 // Main entry point
 // =========================================================================
 
-async function handleTest(message, args) {
-    if (!message.member.roles.cache.has(config.ROLES.AKIVILI)) {
-        return message.reply('Only the server owner can run the test suite.');
-    }
-
-    const sub = args[0]?.toLowerCase();
-    const testChannel = getChannel('TEST_SUITE');
-
-    if (!testChannel) {
-        return message.reply('Test suite channel not found. Check config.');
-    }
-
-    // Clear previous test output
-    await clearTestChannel(testChannel);
-
-    // Save community goals pinned message ID so !reset doesn't orphan it
-    const savedGoal = goals.get.get();
-    const savedGoalMessageId = savedGoal?.channel_message_id;
-
-    // Set channel overrides
-    for (const key of OVERRIDE_KEYS) {
-        setChannelOverride(key, TEST_CHANNEL_ID);
-    }
-
-    try {
-        if (sub === 'card-night' || !sub) {
-            const results = await runCardNightFlow(testChannel);
-            await postResultsEmbed(testChannel, results, 'Card Night Critical Path');
-        }
-        if (sub === 'giveaway' || !sub) {
-            const results = await runGiveawayFlow(testChannel);
-            await postResultsEmbed(testChannel, results, 'Giveaway & Spin');
-        }
-        if (sub === 'race' || !sub) {
-            const results = await runRaceConditionFlow(testChannel);
-            await postResultsEmbed(testChannel, results, 'Race Condition Verification');
-        }
-        if (sub === 'shipping' || !sub) {
-            const results = await runShippingFlow(testChannel);
-            await postResultsEmbed(testChannel, results, 'Shipping Integration');
-        }
-        if (sub === 'loadtest' || !sub) {
-            const results = await runLoadTestFlow(testChannel);
-            await postResultsEmbed(testChannel, results, 'Load Test');
-        }
-        if (sub === 'minecraft' || !sub) {
-            const results = await runMinecraftFlow(testChannel);
-            await postResultsEmbed(testChannel, results, 'Minecraft React-for-DM');
-        }
-
-        // Direct reset — bypass handleReset's confirmation flow
-        clearChannelOverrides();
-        await testChannel.send('🔄 Resetting test data...');
-
-        const TABLES_TO_CLEAR = [
-            'queue_entries', 'queues', 'battle_entries', 'battles',
-            'duck_race_entries', 'giveaway_entries', 'giveaways',
-            'pull_entries', 'card_listings', 'list_sessions',
-            'livestream_buyers', 'livestream_sessions',
-            'purchases', 'purchase_counts', 'discord_links',
-            'shipping_payments', 'active_coupons', 'tracking',
-        ];
-
-        const cleared = [];
-        for (const table of TABLES_TO_CLEAR) {
-            try {
-                const result = db.prepare(`DELETE FROM ${table}`).run();
-                if (result.changes > 0) cleared.push(`${table}: ${result.changes}`);
-            } catch { /* ok */ }
-        }
-
-        // Reset community goals but preserve the pinned message ID
-        db.prepare('UPDATE community_goals SET cycle = 1, cycle_revenue = 0, lifetime_revenue = 0 WHERE id = 1').run();
-        if (savedGoalMessageId) {
-            goals.setMessageId.run(savedGoalMessageId);
-        }
-
-        // Reset autoincrement counters
-        try { db.prepare('DELETE FROM sqlite_sequence').run(); } catch { /* ok */ }
-
-        const summary = cleared.length ? cleared.join(', ') : 'All tables already empty';
-        await testChannel.send(`✅ **Reset complete** — ${summary}`);
-    } finally {
-    }
-}
-
 async function runTestSuite(flow, options = {}) {
-    // Backwards-compatible default: existing callers (Discord `!test`) get the
-    // legacy funnel-to-#test-suite behavior. The CLI passes useChannelOverrides
-    // false + resultsChannel 'OPS' so embeds land in real test-guild channels.
-    const useOverrides = options.useChannelOverrides !== false;
-    const resultsChannelKey = options.resultsChannel || 'TEST_SUITE';
+    const resultsChannelKey = options.resultsChannel || 'OPS';
 
     const testChannel = getChannel(resultsChannelKey);
     if (!testChannel) throw new Error(`Results channel ${resultsChannelKey} not found`);
@@ -1609,12 +1490,6 @@ async function runTestSuite(flow, options = {}) {
     // Save community goals pinned message ID
     const savedGoal = goals.get.get();
     const savedGoalMessageId = savedGoal?.channel_message_id;
-
-    if (useOverrides) {
-        for (const key of OVERRIDE_KEYS) {
-            setChannelOverride(key, testChannel.id);
-        }
-    }
 
     const allResults = [];
     try {
@@ -1649,8 +1524,6 @@ async function runTestSuite(flow, options = {}) {
             allResults.push(...results);
         }
 
-        // Direct reset — same as handleTest
-        if (useOverrides) clearChannelOverrides();
         await testChannel.send('🔄 Resetting test data...');
 
         const TABLES_TO_CLEAR = [
@@ -1672,10 +1545,10 @@ async function runTestSuite(flow, options = {}) {
 
         await testChannel.send('✅ **Reset complete.**');
     } finally {
-        // overrides already cleared
+        // no-op
     }
 
     return allResults;
 }
 
-export { handleTest, runTestSuite };
+export { runTestSuite };
