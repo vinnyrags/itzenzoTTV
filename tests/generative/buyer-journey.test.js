@@ -19,10 +19,15 @@
  * assertions. Failing seeds save to tests/generative/seeds/.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as fc from 'fast-check';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createTestDb, buildStmts } from '../setup.js';
 import { checkoutSessionCompleted } from '../fixtures/stripe-events.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const TEST_BUYERS = ['buyer_alpha', 'buyer_beta', 'buyer_gamma'];
 
@@ -428,30 +433,117 @@ const commandArb = fc.oneof(
 const NUM_RUNS = parseInt(process.env.GENERATIVE_RUNS || '50', 10);
 const MAX_COMMANDS = parseInt(process.env.GENERATIVE_DEPTH || '20', 10);
 
+/**
+ * Run a journey end-to-end against fresh state. Extracted so the seed-replay
+ * spec (below) can call the same flow without going through fc.asyncProperty.
+ */
+async function runJourney(commands) {
+    const db = createTestDb();
+    const stmts = buildStmts(db);
+    dbModule.db = db;
+    Object.assign(dbModule.purchases, stmts.purchases);
+    Object.assign(dbModule.battles, stmts.battles);
+    Object.assign(dbModule.cardListings, stmts.cardListings);
+    Object.assign(dbModule.listSessions, stmts.listSessions);
+    Object.assign(dbModule.discordLinks, stmts.discordLinks);
+    vi.clearAllMocks();
+
+    const real = { db, stmts, model: new BuyerModel() };
+
+    for (const cmd of commands) {
+        if (!cmd.check(real.model)) continue;
+        await cmd.run(real);
+        assertInvariants(real);
+    }
+}
+
+const SEEDS_DIR = path.resolve(__dirname, 'seeds');
+
 describe('generative buyer journey — handler-level invariants', () => {
     it(`holds all invariants across ${NUM_RUNS} random journeys × max ${MAX_COMMANDS} commands`, async () => {
-        await fc.assert(
-            fc.asyncProperty(fc.array(commandArb, { minLength: 1, maxLength: MAX_COMMANDS }), async (commands) => {
-                // Fresh test DB + cleared mocks per journey
-                const db = createTestDb();
-                const stmts = buildStmts(db);
-                dbModule.db = db;
-                Object.assign(dbModule.purchases, stmts.purchases);
-                Object.assign(dbModule.battles, stmts.battles);
-                Object.assign(dbModule.cardListings, stmts.cardListings);
-                Object.assign(dbModule.listSessions, stmts.listSessions);
-                Object.assign(dbModule.discordLinks, stmts.discordLinks);
-                vi.clearAllMocks();
-
-                const real = { db, stmts, model: new BuyerModel() };
-
-                for (const cmd of commands) {
-                    if (!cmd.check(real.model)) continue;
-                    await cmd.run(real);
-                    assertInvariants(real);
-                }
-            }),
-            { numRuns: NUM_RUNS, verbose: false },
-        );
+        try {
+            await fc.assert(
+                fc.asyncProperty(fc.array(commandArb, { minLength: 1, maxLength: MAX_COMMANDS }), async (commands) => {
+                    await runJourney(commands);
+                }),
+                { numRuns: NUM_RUNS, verbose: false },
+            );
+        } catch (err) {
+            // Fast-check throws an Error whose message includes the seed +
+            // counterexample. Persist it so the failure becomes a permanent
+            // regression: the replay spec below will re-execute it on every
+            // future run, even after the original bug is fixed.
+            captureSeed(err);
+            throw err;
+        }
     }, 600_000);
 });
+
+/**
+ * Parse fast-check's failure message and write a fingerprint to seeds/.
+ * The message looks like:
+ *   "Property failed after N tests
+ *    { seed: -1234567, path: "0:1:0", endOnFailure: true }
+ *    Counterexample: [[Purchase(buyer_alpha, seed=1, $1, 1L)]]
+ *    Shrunk N time(s)"
+ */
+function captureSeed(err) {
+    if (!fs.existsSync(SEEDS_DIR)) {
+        fs.mkdirSync(SEEDS_DIR, { recursive: true });
+    }
+    const message = (err && err.message) || String(err);
+    const seedMatch = message.match(/seed:\s*(-?\d+)/);
+    const pathMatch = message.match(/path:\s*"([^"]+)"/);
+    const counterexampleMatch = message.match(/Counterexample:\s*(\[\[.+?\]\])/s);
+
+    if (!seedMatch || !pathMatch) {
+        // Couldn't parse — bail rather than write a useless file
+        console.error('Could not parse fast-check failure for seed capture:', message);
+        return;
+    }
+
+    const fingerprint = {
+        capturedAt: new Date().toISOString(),
+        seed: parseInt(seedMatch[1], 10),
+        path: pathMatch[1],
+        counterexample: counterexampleMatch ? counterexampleMatch[1] : null,
+        commandSchema: 'buyer-journey-v1',
+        // Trace just the assertion text — no stack noise
+        firstError: (message.match(/AssertionError:[^\n]+/) || [])[0] || null,
+    };
+
+    // File name encodes seed for de-duplication. If the same seed reappears
+    // (bug not fixed), we overwrite with the latest capturedAt — fine.
+    const file = path.join(SEEDS_DIR, `seed-${fingerprint.seed}.json`);
+    fs.writeFileSync(file, JSON.stringify(fingerprint, null, 2) + '\n');
+    console.log(`✗ Failure seed captured at tests/generative/seeds/seed-${fingerprint.seed}.json`);
+}
+
+/**
+ * Replay every captured failure seed as a permanent regression. Each seed
+ * runs as its own test so a single bad seed doesn't mask others.
+ */
+const seedFiles = fs.existsSync(SEEDS_DIR)
+    ? fs.readdirSync(SEEDS_DIR).filter((f) => f.endsWith('.json'))
+    : [];
+
+if (seedFiles.length > 0) {
+    describe('captured seeds — permanent regressions', () => {
+        for (const file of seedFiles) {
+            const fingerprint = JSON.parse(fs.readFileSync(path.join(SEEDS_DIR, file), 'utf8'));
+            it(`seed ${fingerprint.seed} (captured ${fingerprint.capturedAt.slice(0, 10)})`, async () => {
+                await fc.assert(
+                    fc.asyncProperty(fc.array(commandArb, { minLength: 1, maxLength: MAX_COMMANDS }), async (commands) => {
+                        await runJourney(commands);
+                    }),
+                    {
+                        seed: fingerprint.seed,
+                        path: fingerprint.path,
+                        endOnFailure: true,
+                        numRuns: 1,
+                    },
+                );
+            }, 60_000);
+        }
+    });
+}
