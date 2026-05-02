@@ -248,7 +248,13 @@ async function postWebhook(results) {
 }
 
 (async () => {
-    const results = await Promise.all(CHECKS.map(runCheck));
+    // Sequential, not parallel: a 6-way Promise.all creates connection-pool +
+    // PHP-FPM worker contention that 2-3x's per-endpoint latency. The canary
+    // should measure what a single buyer's request experiences, not what a
+    // burst of self-traffic causes. Adds ~5s wallclock total (still trivial
+    // for a 15-minute cadence) but the timings actually reflect production.
+    const results = [];
+    for (const check of CHECKS) results.push(await runCheck(check));
     const failed = results.filter((r) => !r.ok);
     const slow = results.filter((r) => r.ok && r.sloBreach);
 
