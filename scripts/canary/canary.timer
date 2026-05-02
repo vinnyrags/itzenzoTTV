@@ -1,0 +1,21 @@
+# /etc/systemd/system/canary.timer
+#
+# Fires canary.service every 15 minutes, persistent across reboots.
+# Aligned to the wall clock (XX:00, XX:15, XX:30, XX:45) for easy
+# correlation with deploy logs / Stripe events.
+
+[Unit]
+Description=Run itzenzo.tv canary every 15 minutes
+Requires=canary.service
+
+[Timer]
+# First run 1 min after boot — gives services time to recover after a reboot
+OnBootSec=1min
+# Then every 15 min on the wall clock
+OnCalendar=*:0/15
+# If the system was off at trigger time, run as soon as it comes back
+Persistent=true
+Unit=canary.service
+
+[Install]
+WantedBy=timers.target

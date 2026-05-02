@@ -1,0 +1,30 @@
+# /etc/systemd/system/canary.service
+#
+# One-shot canary run. Triggered by canary.timer every 15 minutes.
+# Designed to live on the DO droplet alongside the existing nous-bot.service.
+#
+# Place this file at /etc/systemd/system/canary.service and reload:
+#   systemctl daemon-reload
+#   systemctl enable canary.timer && systemctl start canary.timer
+#
+# The Discord webhook URL goes in /etc/canary.env (chmod 600). The unit
+# file references it via EnvironmentFile so the secret never appears in
+# `ps`, `systemctl cat`, or journal output.
+
+[Unit]
+Description=itzenzo.tv production canary (HTTP health checks)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/nous-bot
+EnvironmentFile=/etc/canary.env
+ExecStart=/root/.nvm/versions/node/v20.20.2/bin/node /opt/nous-bot/scripts/canary/run-canary.js
+StandardOutput=journal
+StandardError=journal
+# Don't fail the unit on canary exit=1 (we WANT the alert to fire and the
+# unit to stay healthy so the timer keeps firing). exit=2 is a setup bug
+# and should fail loud.
+SuccessExitStatus=0 1
