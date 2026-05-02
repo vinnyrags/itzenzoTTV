@@ -163,7 +163,9 @@ async function postWebhook(results) {
     const sloBreached = results.filter((r) => r.ok && r.sloBreach);
 
     const isRed = failed.length > 0;
-    if (!isRed && !VERBOSE) return;
+    const isYellow = !isRed && sloBreached.length > 0;
+    // Post on red (broken) and yellow (slow). Pure-green requires CANARY_VERBOSE=1.
+    if (!isRed && !isYellow && !VERBOSE) return;
 
     const totalMs = results.reduce((sum, r) => sum + r.elapsed, 0);
     const summary = isRed
