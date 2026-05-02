@@ -97,7 +97,15 @@ const CHECKS = [
         name: 'itzenzo.tv /api/queue/snapshot',
         // 200 with JSON; 304 if ETag matches a prior request (also fine)
         expect: ({ status }) => status === 200 || status === 304,
-        slo: 2000,
+        // This is the polling-fallback for the homepage Live Queue when SSE
+        // disconnects. It's a separate code path from the WP REST endpoint
+        // below: it calls WPGraphQL's liveQueue field with force-dynamic /
+        // noStore, so each canary call is a true cold-cache request. The
+        // 3000ms budget reflects (WP GraphQL ~2000ms) + (Next.js route
+        // overhead ~500-700ms). If this drops below 2000ms steady-state,
+        // tighten the budget — likely means an edge-cache landed on the
+        // route or the GraphQL resolver got optimized.
+        slo: 3000,
     },
     {
         url: `${WP}/wp-json/shop/v1/queue`,
