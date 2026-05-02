@@ -8,7 +8,8 @@
     "start": "node index.js",
     "dev": "node --watch index.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:critical": "node bin/run-test-suite.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",

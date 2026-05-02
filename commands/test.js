@@ -1596,16 +1596,24 @@ async function handleTest(message, args) {
     }
 }
 
-async function runTestSuite(flow) {
-    const testChannel = getChannel('TEST_SUITE');
-    if (!testChannel) throw new Error('Test suite channel not found');
+async function runTestSuite(flow, options = {}) {
+    // Backwards-compatible default: existing callers (Discord `!test`) get the
+    // legacy funnel-to-#test-suite behavior. The CLI passes useChannelOverrides
+    // false + resultsChannel 'OPS' so embeds land in real test-guild channels.
+    const useOverrides = options.useChannelOverrides !== false;
+    const resultsChannelKey = options.resultsChannel || 'TEST_SUITE';
+
+    const testChannel = getChannel(resultsChannelKey);
+    if (!testChannel) throw new Error(`Results channel ${resultsChannelKey} not found`);
 
     // Save community goals pinned message ID
     const savedGoal = goals.get.get();
     const savedGoalMessageId = savedGoal?.channel_message_id;
 
-    for (const key of OVERRIDE_KEYS) {
-        setChannelOverride(key, TEST_CHANNEL_ID);
+    if (useOverrides) {
+        for (const key of OVERRIDE_KEYS) {
+            setChannelOverride(key, testChannel.id);
+        }
     }
 
     const allResults = [];
@@ -1642,7 +1650,7 @@ async function runTestSuite(flow) {
         }
 
         // Direct reset — same as handleTest
-        clearChannelOverrides();
+        if (useOverrides) clearChannelOverrides();
         await testChannel.send('🔄 Resetting test data...');
 
         const TABLES_TO_CLEAR = [
