@@ -30,32 +30,33 @@ node scripts/canary/run-canary.js
 # prints per-check status + total fail/slow counts; exits 1 on any failure
 ```
 
-## Production install
+## Production install (preferred: bot-token mode)
 
-### 1. Create a Discord webhook
+### 1. Pick the channel for alerts
 
-In your Discord server (production guild — where you want alerts to land):
+In your production Discord server, decide where canary alerts should land
+(e.g., #ops or a fresh #canary). Right-click the channel → **Copy Channel
+ID** (Developer Mode must be on under User Settings → Advanced).
 
-1. Go to a channel where you want canary alerts (recommend creating a fresh `#canary` channel)
-2. Channel settings (gear icon) → **Integrations** → **Webhooks** → **New Webhook**
-3. Name it `Canary` → **Copy Webhook URL**
-
-### 2. Drop the webhook URL into a secrets file on the DO droplet
+### 2. Drop the channel id into the canary env file
 
 ```bash
 ssh root@174.138.70.29
-echo "CANARY_WEBHOOK_URL=https://discord.com/api/webhooks/..." > /etc/canary.env
+echo "CANARY_CHANNEL_ID=<paste channel id>" > /etc/canary.env
 chmod 600 /etc/canary.env
 ```
+
+That's the only configuration needed — the canary auto-reads
+`DISCORD_BOT_TOKEN` from `/opt/nous-bot/.env`, so the production bot
+posts the alerts as itself. No webhook URL setup, no token duplication.
 
 ### 3. Install the systemd units
 
 ```bash
-# From the Nous deploy on the box
-sudo cp /opt/nous-bot/scripts/canary/canary.service /etc/systemd/system/canary.service
-sudo cp /opt/nous-bot/scripts/canary/canary.timer /etc/systemd/system/canary.timer
-sudo systemctl daemon-reload
-sudo systemctl enable --now canary.timer
+cp /opt/nous-bot/scripts/canary/canary.service /etc/systemd/system/
+cp /opt/nous-bot/scripts/canary/canary.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now canary.timer
 ```
 
 ### 4. Verify
@@ -64,13 +65,25 @@ sudo systemctl enable --now canary.timer
 # Confirm the timer is armed
 systemctl list-timers canary.timer
 
-# Run once manually to test the webhook delivery
-sudo systemctl start canary.service
+# Run once manually to test the alert delivery
+systemctl start canary.service
 journalctl -u canary.service -n 20 --no-pager
 
-# After a deliberate green run, set CANARY_VERBOSE=1 in /etc/canary.env to
-# get a one-time green confirmation embed in Discord, then unset it.
+# To get a one-time green confirmation in Discord (handy after install):
+echo "CANARY_VERBOSE=1" >> /etc/canary.env
+systemctl start canary.service
+# then remove the line so red-only is the steady state
+sed -i '/CANARY_VERBOSE/d' /etc/canary.env
 ```
+
+## Alternate install (webhook mode)
+
+If you'd rather not have the production bot post canary alerts (e.g., you
+want a separate identity for ops alerts), use a channel webhook URL:
+
+1. Discord channel settings → Integrations → Webhooks → New Webhook → Copy URL
+2. Replace `CANARY_CHANNEL_ID=…` with `CANARY_WEBHOOK_URL=…` in `/etc/canary.env`
+3. Restart: `systemctl start canary.service`
 
 ## What red looks like
 

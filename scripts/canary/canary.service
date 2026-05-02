@@ -7,9 +7,11 @@
 #   systemctl daemon-reload
 #   systemctl enable canary.timer && systemctl start canary.timer
 #
-# The Discord webhook URL goes in /etc/canary.env (chmod 600). The unit
-# file references it via EnvironmentFile so the secret never appears in
-# `ps`, `systemctl cat`, or journal output.
+# Configuration goes in /etc/canary.env (chmod 600). Minimum needed:
+#   CANARY_CHANNEL_ID=<discord channel id where alerts post>
+# The bot token is auto-discovered from /opt/nous-bot/.env — no
+# duplication needed. (Override with CANARY_BOT_TOKEN= if you want a
+# different bot doing the posting.)
 
 [Unit]
 Description=itzenzo.tv production canary (HTTP health checks)
@@ -20,7 +22,7 @@ Wants=network-online.target
 Type=oneshot
 User=root
 WorkingDirectory=/opt/nous-bot
-EnvironmentFile=/etc/canary.env
+EnvironmentFile=-/etc/canary.env
 ExecStart=/root/.nvm/versions/node/v20.20.2/bin/node /opt/nous-bot/scripts/canary/run-canary.js
 StandardOutput=journal
 StandardError=journal

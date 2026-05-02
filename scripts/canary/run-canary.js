@@ -6,25 +6,62 @@
  * exits 1 AND posts a Discord embed describing what broke.
  *
  * Designed to run on a systemd timer or cron on the DO droplet, but
- * works anywhere with internet access (no bot token, no Nous import,
- * no DDEV — pure node + fetch).
+ * works anywhere with internet access (no Nous import, no DDEV — pure
+ * node + fetch).
+ *
+ * Two alerting modes (cascading priority):
+ *   Mode A — Bot + channel (preferred when running alongside Nous):
+ *     CANARY_BOT_TOKEN and CANARY_CHANNEL_ID set → posts via the bot's
+ *     existing Discord auth. No webhook URL setup needed; the production
+ *     bot is already in your guild and authenticated.
+ *   Mode B — Webhook URL (works anywhere):
+ *     CANARY_WEBHOOK_URL set → posts via a channel webhook. Useful when
+ *     running the canary off-box or with a separate alerting account.
+ *
+ * If neither is set, alerting is silent (exit code is the only signal).
  *
  * Env:
- *   CANARY_WEBHOOK_URL    Discord webhook URL (required for alerting).
- *                         Create via channel settings → Integrations →
- *                         Webhooks → New Webhook in #ops or #canary.
- *   CANARY_VERBOSE=1      Also notify on green (default: red-only).
+ *   CANARY_BOT_TOKEN      Discord bot token to post via bot REST API
+ *   CANARY_CHANNEL_ID     Channel id (NOT name) to post canary alerts to
+ *   CANARY_WEBHOOK_URL    Channel-webhook URL (alternative to bot token)
+ *   CANARY_VERBOSE=1      Also notify on green (default: red-only)
  *   CANARY_SITE=...       Override base site (default: https://itzenzo.tv)
  *   CANARY_WP=...         Override WP host (default: https://vincentragosta.io)
  *
  * Exit codes:
  *   0  all checks passed
  *   1  one or more checks failed
- *   2  setup error (missing env, etc.)
+ *   2  setup error
  */
 
 const SITE = process.env.CANARY_SITE || 'https://itzenzo.tv';
 const WP = process.env.CANARY_WP || 'https://vincentragosta.io';
+
+/**
+ * Bot-token resolution: prefer an explicit CANARY_BOT_TOKEN, otherwise
+ * fall back to reading DISCORD_BOT_TOKEN from /opt/nous-bot/.env.
+ *
+ * On the production droplet this means a fresh canary install only needs
+ * a CHANNEL_ID — the token is already on disk in the bot's existing
+ * config and we reuse it. Off-box callers can still set CANARY_BOT_TOKEN
+ * explicitly.
+ */
+import fs from 'node:fs';
+
+function resolveBotToken() {
+    if (process.env.CANARY_BOT_TOKEN) return process.env.CANARY_BOT_TOKEN;
+    try {
+        const env = fs.readFileSync('/opt/nous-bot/.env', 'utf8');
+        const match = env.match(/^DISCORD_BOT_TOKEN=(.+)$/m);
+        if (match) return match[1].trim().replace(/^['"]|['"]$/g, '');
+    } catch {
+        // file not readable — return null
+    }
+    return null;
+}
+
+const BOT_TOKEN = resolveBotToken();
+const CHANNEL_ID = process.env.CANARY_CHANNEL_ID || null;
 const WEBHOOK = process.env.CANARY_WEBHOOK_URL || null;
 const VERBOSE = process.env.CANARY_VERBOSE === '1';
 
@@ -114,8 +151,11 @@ async function runCheck(check) {
 }
 
 async function postWebhook(results) {
-    if (!WEBHOOK) {
-        console.log('CANARY_WEBHOOK_URL not set — skipping Discord notification.');
+    const usingBot = !!(BOT_TOKEN && CHANNEL_ID);
+    const usingWebhook = !!WEBHOOK;
+
+    if (!usingBot && !usingWebhook) {
+        console.log('No CANARY_BOT_TOKEN+CHANNEL_ID and no CANARY_WEBHOOK_URL — skipping Discord notification.');
         return;
     }
 
@@ -166,6 +206,30 @@ async function postWebhook(results) {
         timestamp: new Date().toISOString(),
     };
 
+    // Mode A — Bot + channel: post via Discord REST as the bot
+    if (usingBot) {
+        try {
+            const res = await fetch(`https://discord.com/api/v10/channels/${CHANNEL_ID}/messages`, {
+                method: 'POST',
+                headers: {
+                    Authorization: `Bot ${BOT_TOKEN}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ embeds: [embed] }),
+                signal: AbortSignal.timeout(10_000),
+            });
+            if (!res.ok) {
+                console.error(`Bot post → ${res.status} ${await res.text()}`);
+            }
+            return;
+        } catch (e) {
+            console.error('Bot post failed:', e.message);
+            // Fall through to webhook fallback below if both are configured
+            if (!usingWebhook) return;
+        }
+    }
+
+    // Mode B — Channel webhook URL
     try {
         const res = await fetch(WEBHOOK, {
             method: 'POST',
