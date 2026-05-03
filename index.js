@@ -28,158 +28,17 @@
 import config from './config.js';
 import { client } from './discord.js';
 import { startServer } from './server.js';
-import { handleLive, handleOffline } from './commands/live.js';
-import { handleBattle } from './commands/battle.js';
-import { handleQueue, handleDuckRace } from './commands/queue.js';
-import { handleLink } from './commands/link.js';
-import { handleSell, handleList, handleSold } from './commands/card-shop.js';
-import { handleShipping } from './commands/shipping.js';
-import { handleHype } from './commands/hype.js';
-import { handleDroppedOff } from './commands/dropped-off.js';
-import { handleSnapshot } from './commands/snapshot.js';
-import { handleGiveaway, initGiveaways } from './commands/giveaway.js';
-import { handleSync } from './commands/sync.js';
-import { handleCoupon } from './commands/coupon.js';
-import { handleIntl, handleIntlShip } from './commands/intl.js';
-import { handleShippingAudit } from './commands/shipping-audit.js';
-import { handleWaive } from './commands/waive.js';
-import { handleRefund } from './commands/refund.js';
-import { handleNous } from './commands/nous.js';
-import { handlePull } from './commands/pull.js';
-import { handleReset } from './commands/reset.js';
-import { handleSpin } from './commands/spin.js';
-import { handleCapture } from './commands/capture.js';
-import { handleTracking } from './commands/tracking.js';
-import { handleShipments } from './commands/shipments.js';
+import { initGiveaways } from './commands/giveaway.js';
 import { syncBotCommands } from './sync-bot-commands.js';
 import { initCommunityGoals } from './community-goals.js';
 import { initWelcome } from './commands/welcome.js';
 import { initMinecraftChannel, handleMinecraftReaction } from './commands/minecraft.js';
 import { initLfgChannel } from './commands/lfg.js';
-import { handleRequests, handleRequest } from './commands/card-requests.js';
-const PREFIX = '!';
-
 // =========================================================================
-// Message handler — route commands
+// Legacy !command text dispatcher removed 2026-05-03 — all ops commands
+// run as Discord slash commands now (see SLASH_HANDLERS below). Clean
+// state: never went live with the legacy path post-cutover.
 // =========================================================================
-
-client.on('messageCreate', async (message) => {
-    // Ignore own messages (prevent self-loops) and DMs
-    if (message.author.id === client.user.id) return;
-    if (!message.guild) return;
-
-    // Only respond to messages with the prefix
-    if (!message.content.startsWith(PREFIX)) return;
-
-    const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
-    const command = args.shift().toLowerCase();
-
-    try {
-        switch (command) {
-            case 'live':
-                await handleLive(message);
-                break;
-            case 'offline':
-                await handleOffline(message);
-                break;
-            case 'battle':
-                await handleBattle(message, args);
-                break;
-            case 'queue':
-                await handleQueue(message, args);
-                break;
-            case 'duckrace':
-                await handleDuckRace(message, args);
-                break;
-            case 'link':
-                await handleLink(message, args);
-                break;
-            case 'sell':
-                await handleSell(message, args);
-                break;
-            case 'list':
-                await handleList(message, args);
-                break;
-            case 'sold':
-                await handleSold(message, args);
-                break;
-            case 'shipping':
-                await handleShipping(message, args);
-                break;
-            case 'hype':
-                await handleHype(message, args);
-                break;
-            case 'dropped-off':
-                await handleDroppedOff(message, args);
-                break;
-            case 'snapshot':
-                await handleSnapshot(message, args);
-                break;
-            case 'giveaway':
-                await handleGiveaway(message, args);
-                break;
-            case 'spin':
-                await handleSpin(message, args);
-                break;
-            case 'capture':
-                await handleCapture(message, args);
-                break;
-            case 'sync':
-                await handleSync(message, args);
-                break;
-            case 'coupon':
-                await handleCoupon(message, args);
-                break;
-            case 'intl':
-                await handleIntl(message, args);
-                break;
-            case 'intl-ship':
-                await handleIntlShip(message);
-                break;
-            case 'shipping-audit':
-                await handleShippingAudit(message, args);
-                break;
-            case 'waive':
-                await handleWaive(message, args);
-                break;
-            case 'refund':
-                await handleRefund(message, args);
-                break;
-            case 'nous':
-                await handleNous(message, args);
-                break;
-            case 'pull':
-                await handlePull(message, args);
-                break;
-            case 'reset':
-                await handleReset(message);
-                break;
-            case 'tracking':
-                await handleTracking(message, args);
-                break;
-            case 'shipments':
-                await handleShipments(message, args);
-                break;
-            case 'ship-status':
-                await handleShipments(message, ['status', ...args]);
-                break;
-            case 'requests':
-                await handleRequests(message, args);
-                break;
-            case 'request':
-                await handleRequest(message, args);
-                break;
-            default:
-                // Unknown command — silently ignore
-                break;
-        }
-    } catch (e) {
-        console.error(`Error handling command !${command}:`, e.message);
-        try {
-            await message.reply('Something went wrong. Try again or ping a mod.');
-        } catch { /* can't reply */ }
-    }
-});
 
 // =========================================================================
 // Slash command dispatcher
@@ -194,12 +53,37 @@ import { handleHypeSlash } from './commands/slash/hype.js';
 import { handleBattleSlash } from './commands/slash/battle.js';
 import { handleDuckRaceSlash } from './commands/slash/duckrace.js';
 import { handleSpinSlash } from './commands/slash/spin.js';
+import {
+    handleLinkSlash,
+    handlePullSlash,
+    handleGiveawaySlash,
+    handleCouponSlash,
+    handleTrackingSlash,
+    handleShipmentsSlash,
+    handleRefundSlash,
+    handleWaiveSlash,
+    handleSnapshotSlash,
+    handleCaptureSlash,
+    handleNousSlash,
+    handleShippingAdminSlash,
+    handleShippingAuditSlash,
+    handleIntlSlash,
+    handleIntlShipSlash,
+    handleDroppedOffSlash,
+    handleRequestsSlash,
+    handleRequestSlash,
+    handleSellSlash,
+    handleListSlash,
+    handleSoldSlash,
+} from './commands/slash/phase-c.js';
 import { withAudit } from './lib/op-audit.js';
 
 const SLASH_HANDLERS = {
+    // Phase A
     op: withAudit('op', handleOp),
     queue: withAudit('queue', handleQueueSlash),
     reset: withAudit('reset', handleResetSlash),
+    // Phase B (high-frequency native)
     live: withAudit('live', handleLiveSlash),
     offline: withAudit('offline', handleOfflineSlash),
     sync: withAudit('sync', handleSyncSlash),
@@ -207,6 +91,28 @@ const SLASH_HANDLERS = {
     battle: withAudit('battle', handleBattleSlash),
     duckrace: withAudit('duckrace', handleDuckRaceSlash),
     spin: withAudit('spin', handleSpinSlash),
+    // Phase C (mid/low-frequency native)
+    link: withAudit('link', handleLinkSlash),
+    pull: withAudit('pull', handlePullSlash),
+    giveaway: withAudit('giveaway', handleGiveawaySlash),
+    coupon: withAudit('coupon', handleCouponSlash),
+    tracking: withAudit('tracking', handleTrackingSlash),
+    shipments: withAudit('shipments', handleShipmentsSlash),
+    refund: withAudit('refund', handleRefundSlash),
+    waive: withAudit('waive', handleWaiveSlash),
+    snapshot: withAudit('snapshot', handleSnapshotSlash),
+    capture: withAudit('capture', handleCaptureSlash),
+    nous: withAudit('nous', handleNousSlash),
+    shipping: withAudit('shipping', handleShippingAdminSlash),
+    'shipping-audit': withAudit('shipping-audit', handleShippingAuditSlash),
+    intl: withAudit('intl', handleIntlSlash),
+    'intl-ship': withAudit('intl-ship', handleIntlShipSlash),
+    'dropped-off': withAudit('dropped-off', handleDroppedOffSlash),
+    requests: withAudit('requests', handleRequestsSlash),
+    request: withAudit('request', handleRequestSlash),
+    sell: withAudit('sell', handleSellSlash),
+    list: withAudit('list', handleListSlash),
+    sold: withAudit('sold', handleSoldSlash),
 };
 
 // =========================================================================
