@@ -38,20 +38,98 @@ const commands = [
             .setDescription('e.g. "queue close", "battle start \\"My Product\\" 20", "sync"')
             .setRequired(true)),
 
-    // /queue open|close|history
+    // /queue open|close|history|next|skip
     new SlashCommandBuilder()
         .setName('queue')
         .setDescription('Manage the live queue session')
         .setDefaultMemberPermissions(ADMIN_ONLY)
         .addSubcommand((s) => s.setName('open').setDescription('Open a fresh queue session'))
         .addSubcommand((s) => s.setName('close').setDescription('Close the active session'))
-        .addSubcommand((s) => s.setName('history').setDescription('Show recent sessions')),
+        .addSubcommand((s) => s.setName('history').setDescription('Show recent sessions'))
+        .addSubcommand((s) => s.setName('next').setDescription('Advance to the next entry'))
+        .addSubcommand((s) => s.setName('skip').setDescription('Skip the current entry')),
 
     // /reset (button confirmation in handler)
     new SlashCommandBuilder()
         .setName('reset')
         .setDescription('Wipe transactional state for next stream (with confirmation)')
         .setDefaultMemberPermissions(ADMIN_ONLY),
+
+    // /live — go live
+    new SlashCommandBuilder()
+        .setName('live')
+        .setDescription('Announce stream start; set live state')
+        .setDefaultMemberPermissions(ADMIN_ONLY),
+
+    // /offline — go offline
+    new SlashCommandBuilder()
+        .setName('offline')
+        .setDescription('Announce stream end; clear live state')
+        .setDefaultMemberPermissions(ADMIN_ONLY),
+
+    // /sync mode:full|stripe
+    new SlashCommandBuilder()
+        .setName('sync')
+        .setDescription('Sync catalog (Sheets → Stripe → WordPress)')
+        .setDefaultMemberPermissions(ADMIN_ONLY)
+        .addStringOption((opt) => opt
+            .setName('mode')
+            .setDescription('full = Sheets+Stripe+WP (default), stripe = Stripe-only (faster)')
+            .addChoices(
+                { name: 'full (default)', value: 'full' },
+                { name: 'stripe', value: 'stripe' },
+            )),
+
+    // /hype — community goal hype announcement
+    new SlashCommandBuilder()
+        .setName('hype')
+        .setDescription('Community-goal hype announcement')
+        .setDefaultMemberPermissions(ADMIN_ONLY),
+
+    // /battle <subcommand>
+    new SlashCommandBuilder()
+        .setName('battle')
+        .setDescription('Manage pack battles')
+        .setDefaultMemberPermissions(ADMIN_ONLY)
+        .addSubcommand((s) => s
+            .setName('start')
+            .setDescription('Start a new pack battle')
+            .addStringOption((o) => o.setName('product').setDescription('Product name').setRequired(true))
+            .addIntegerOption((o) => o.setName('max').setDescription('Max entries (default 20, capped at 50)').setMinValue(2).setMaxValue(50)))
+        .addSubcommand((s) => s.setName('close').setDescription('Close the active battle'))
+        .addSubcommand((s) => s.setName('cancel').setDescription('Cancel the active battle'))
+        .addSubcommand((s) => s.setName('status').setDescription('Show battle status'))
+        .addSubcommand((s) => s
+            .setName('winner')
+            .setDescription('Declare the battle winner')
+            .addUserOption((o) => o.setName('user').setDescription('Winning user').setRequired(true))),
+
+    // /duckrace <subcommand>
+    new SlashCommandBuilder()
+        .setName('duckrace')
+        .setDescription('Run the duck race for the active queue')
+        .setDefaultMemberPermissions(ADMIN_ONLY)
+        .addSubcommand((s) => s.setName('show').setDescription('Show current duck race state'))
+        .addSubcommand((s) => s.setName('start').setDescription('Start the duck race'))
+        .addSubcommand((s) => s
+            .setName('winner')
+            .setDescription('Declare the duck race winner')
+            .addUserOption((o) => o.setName('user').setDescription('Winning user').setRequired(true)))
+        .addSubcommand((s) => s
+            .setName('pick')
+            .setDescription('Owner-only: rig the duck race outcome')
+            .addUserOption((o) => o.setName('user').setDescription('User to pick').setRequired(true))),
+
+    // /spin — pick giveaway winner
+    new SlashCommandBuilder()
+        .setName('spin')
+        .setDescription('Pick a giveaway winner')
+        .setDefaultMemberPermissions(ADMIN_ONLY)
+        .addSubcommand((s) => s.setName('random').setDescription('Random pick from giveaway entrants'))
+        .addSubcommand((s) => s
+            .setName('pick')
+            .setDescription('Owner-only: pick a specific winner')
+            .addUserOption((o) => o.setName('user').setDescription('User to pick').setRequired(true))),
 ].map((c) => c.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(TOKEN);

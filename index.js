@@ -188,12 +188,25 @@ client.on('messageCreate', async (message) => {
 import { handleOp } from './commands/slash/op.js';
 import { handleQueueSlash } from './commands/slash/queue.js';
 import { handleResetSlash } from './commands/slash/reset.js';
+import { handleLiveSlash, handleOfflineSlash } from './commands/slash/live.js';
+import { handleSyncSlash } from './commands/slash/sync.js';
+import { handleHypeSlash } from './commands/slash/hype.js';
+import { handleBattleSlash } from './commands/slash/battle.js';
+import { handleDuckRaceSlash } from './commands/slash/duckrace.js';
+import { handleSpinSlash } from './commands/slash/spin.js';
 import { withAudit } from './lib/op-audit.js';
 
 const SLASH_HANDLERS = {
     op: withAudit('op', handleOp),
     queue: withAudit('queue', handleQueueSlash),
     reset: withAudit('reset', handleResetSlash),
+    live: withAudit('live', handleLiveSlash),
+    offline: withAudit('offline', handleOfflineSlash),
+    sync: withAudit('sync', handleSyncSlash),
+    hype: withAudit('hype', handleHypeSlash),
+    battle: withAudit('battle', handleBattleSlash),
+    duckrace: withAudit('duckrace', handleDuckRaceSlash),
+    spin: withAudit('spin', handleSpinSlash),
 };
 
 // =========================================================================

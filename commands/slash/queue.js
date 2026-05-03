@@ -1,9 +1,11 @@
 /**
  * /queue — native slash command.
  *
- * /queue open                — open a fresh queue session
- * /queue close               — close the active session
- * /queue history             — show recent sessions
+ * /queue open                  — open a fresh queue session
+ * /queue close                 — close the active session
+ * /queue history               — show recent sessions
+ * /queue next                  — advance to next entry
+ * /queue skip                  — skip the current entry
  *
  * Subcommands give Discord-native autocomplete. Internally still calls
  * handleQueue(syntheticMessage, [subcommand, ...]) so the existing logic
