@@ -36,7 +36,8 @@ const commands = [
         .addStringOption((opt) => opt
             .setName('command')
             .setDescription('e.g. "queue close", "battle start \\"My Product\\" 20", "sync"')
-            .setRequired(true)),
+            .setRequired(true)
+            .setAutocomplete(true)),
 
     // /queue open|close|history|next|skip
     new SlashCommandBuilder()

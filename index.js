@@ -47,7 +47,7 @@ import { initLfgChannel } from './commands/lfg.js';
 // Slash command dispatcher
 // =========================================================================
 
-import { handleOp } from './commands/slash/op.js';
+import { handleOp, ROUTE_NAMES } from './commands/slash/op.js';
 import { handleQueueSlash } from './commands/slash/queue.js';
 import { handleResetSlash } from './commands/slash/reset.js';
 import { handleLiveSlash, handleOfflineSlash } from './commands/slash/live.js';
@@ -119,11 +119,44 @@ const SLASH_HANDLERS = {
 };
 
 // =========================================================================
+// Autocomplete router — slash command typed-as-you-go suggestions
+// =========================================================================
+
+async function routeAutocomplete(interaction) {
+    const focused = interaction.options.getFocused(true);
+    const value = (focused?.value || '').toString().toLowerCase().trim();
+
+    if (interaction.commandName === 'op' && focused.name === 'command') {
+        // /op <command> — match against the legacy command names
+        const matches = ROUTE_NAMES
+            .filter((name) => !value || name.toLowerCase().startsWith(value))
+            .slice(0, 25)
+            .map((name) => ({ name, value: name }));
+        return interaction.respond(matches);
+    }
+
+    // No autocomplete handler registered for this option — return empty so
+    // Discord shows "no results" rather than spinning until timeout.
+    return interaction.respond([]);
+}
+
+// =========================================================================
 // Interaction handler — slash commands, buttons, modals, selects
 // =========================================================================
 
 client.on('interactionCreate', async (interaction) => {
-    // Slash commands first (chat input)
+    // Autocomplete suggestions (typed-as-you-go) — must respond within 3s
+    if (interaction.isAutocomplete()) {
+        try {
+            await routeAutocomplete(interaction);
+        } catch (e) {
+            console.error('Autocomplete error:', e.message);
+            try { await interaction.respond([]); } catch { /* timed out */ }
+        }
+        return;
+    }
+
+    // Slash commands (chat input)
     if (interaction.isChatInputCommand()) {
         const handler = SLASH_HANDLERS[interaction.commandName];
         if (!handler) {

@@ -22,26 +22,11 @@ const client = new Client({
     partials: [Partials.Message, Partials.Reaction, Partials.User],
 });
 
-// Channel overrides for test mode — redirects output to #test-suite
-const channelOverrides = new Map();
-
-function setChannelOverride(key, channelId) {
-    channelOverrides.set(key, channelId);
-}
-
-function clearChannelOverrides() {
-    channelOverrides.clear();
-}
-
-function isChannelOverridden(key) {
-    return channelOverrides.has(key);
-}
-
 /**
- * Get a text channel by its config key. Respects test overrides.
+ * Get a text channel by its config key.
  */
 function getChannel(key) {
-    return client.channels.cache.get(channelOverrides.get(key) || config.CHANNELS[key]);
+    return client.channels.cache.get(config.CHANNELS[key]);
 }
 
 /**
@@ -135,9 +120,6 @@ async function findMemberByUsername(username) {
 export {
     client,
     getChannel,
-    setChannelOverride,
-    clearChannelOverrides,
-    isChannelOverridden,
     getGuild,
     sendToChannel,
     sendEmbed,
