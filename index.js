@@ -182,10 +182,46 @@ client.on('messageCreate', async (message) => {
 });
 
 // =========================================================================
-// Button interaction handler — identity-aware checkouts
+// Slash command dispatcher
+// =========================================================================
+
+import { handleOp } from './commands/slash/op.js';
+import { handleQueueSlash } from './commands/slash/queue.js';
+import { handleResetSlash } from './commands/slash/reset.js';
+import { withAudit } from './lib/op-audit.js';
+
+const SLASH_HANDLERS = {
+    op: withAudit('op', handleOp),
+    queue: withAudit('queue', handleQueueSlash),
+    reset: withAudit('reset', handleResetSlash),
+};
+
+// =========================================================================
+// Interaction handler — slash commands, buttons, modals, selects
 // =========================================================================
 
 client.on('interactionCreate', async (interaction) => {
+    // Slash commands first (chat input)
+    if (interaction.isChatInputCommand()) {
+        const handler = SLASH_HANDLERS[interaction.commandName];
+        if (!handler) {
+            return interaction.reply({ content: `No handler for /${interaction.commandName}`, ephemeral: true });
+        }
+        try {
+            await handler(interaction);
+        } catch (e) {
+            console.error(`Error handling /${interaction.commandName}:`, e.message);
+            try {
+                if (interaction.replied || interaction.deferred) {
+                    await interaction.followUp({ content: `Failed: ${e.message}`, ephemeral: true });
+                } else {
+                    await interaction.reply({ content: `Failed: ${e.message}`, ephemeral: true });
+                }
+            } catch { /* can't reply */ }
+        }
+        return;
+    }
+
     if (!interaction.isButton() && !interaction.isModalSubmit() && !interaction.isStringSelectMenu()) return;
 
     try {
