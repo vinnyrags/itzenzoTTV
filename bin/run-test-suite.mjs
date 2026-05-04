@@ -44,6 +44,51 @@ function loadEnvFile(filePath) {
     }
 }
 
+/**
+ * Wipe every text channel in the given guild. Intended for the test guild
+ * only — caller MUST assert that before invoking. Uses bulkDelete for
+ * messages newer than 14 days (Discord's bulkDelete cutoff) and falls
+ * back to per-message delete for anything older.
+ *
+ * Same pattern as commands/minecraft.js:clearChannelMessages, but takes
+ * everything (no nonBot filter) — we want a fully-empty channel set.
+ */
+async function clearTestGuildChannels(guild) {
+    console.log('> Clearing test guild channels (set CLEAN_TEST_GUILD=0 to skip)...');
+    let totalCleared = 0;
+
+    for (const channel of guild.channels.cache.values()) {
+        if (channel.type !== 0) continue; // text channels only
+
+        let cleared = 0;
+        try {
+            let fetched;
+            do {
+                fetched = await channel.messages.fetch({ limit: 100 });
+                if (fetched.size === 0) break;
+
+                try {
+                    const result = await channel.bulkDelete(fetched, true);
+                    cleared += result.size;
+                } catch { /* bulkDelete fails for >14d old; fall through */ }
+
+                const tooOld = fetched.filter(
+                    (m) => Date.now() - m.createdTimestamp >= 14 * 24 * 60 * 60 * 1000,
+                );
+                for (const m of tooOld.values()) {
+                    try { await m.delete(); cleared++; } catch { /* ok */ }
+                }
+            } while (fetched.size >= 2);
+        } catch { /* permission errors etc — skip silently */ }
+
+        if (cleared > 0) {
+            totalCleared += cleared;
+            console.log(`  - #${channel.name}: cleared ${cleared}`);
+        }
+    }
+    console.log(`> Cleared ${totalCleared} message${totalCleared === 1 ? '' : 's'} across the test guild.`);
+}
+
 loadEnvFile(path.join(ROOT, '.env'));
 loadEnvFile(path.join(ROOT, '.env.test'));
 
@@ -134,6 +179,24 @@ if (dryRun) {
     console.log(`> Dry run — connection + channel mapping verified. Skipping flows.`);
     await client.destroy();
     process.exit(0);
+}
+
+// ---------------------------------------------------------------------------
+// Step 3.5 — clear test guild channels for a clean run.
+// Set CLEAN_TEST_GUILD=0 to skip (faster local iteration when you don't
+// care about residue from previous runs). Defaults to on.
+//
+// Safety: hardcoded deny on the production guild ID. Even if some future
+// edit of this bootstrap forgot to swap GUILD_ID to the test guild, this
+// check would refuse to wipe production. Belt + suspenders.
+// ---------------------------------------------------------------------------
+const PRODUCTION_GUILD_ID = '862139045974638612';
+if (process.env.CLEAN_TEST_GUILD !== '0') {
+    if (config.GUILD_ID === PRODUCTION_GUILD_ID || !process.env.DISCORD_TEST_GUILD_ID) {
+        console.error(`> ABORT: refusing to clear messages — guild ${config.GUILD_ID} is production (or test guild ID missing)`);
+        process.exit(1);
+    }
+    await clearTestGuildChannels(guild);
 }
 
 const { runTestSuite } = await import('../commands/test.js');
