@@ -11,7 +11,6 @@ import Stripe from 'stripe';
 import { EmbedBuilder } from 'discord.js';
 import config from '../config.js';
 import { coupons } from '../db.js';
-import { sendEmbed } from '../discord.js';
 import { broadcastCouponDrop } from '../lib/activity-broadcaster.js';
 
 /**
@@ -181,18 +180,16 @@ async function handleActivate(message, code) {
             return message.reply('A coupon was activated by someone else just now. Run `!coupon status` to check.');
         }
 
-        // Announce
-        await sendEmbed('ANNOUNCEMENTS', {
-            title: '🏷️ Coupon Active!',
-            description: `Use code **\`${code}\`** at checkout for **${displayDiscount}**!`,
-            color: 0xceff00,
-        });
-
-        broadcastCouponDrop(code, displayDiscount);
+        // Word-of-mouth model: no #announcements post, no code in the
+        // Activity Feed. The feed gets a generic "Coupon drop" signal
+        // (discount only, no redeemable code). Operator shares the
+        // actual code via DM / chat / social channels as they see fit.
+        broadcastCouponDrop(displayDiscount);
 
         await message.channel.send(
             `🏷️ **Coupon activated**: \`${code}\` (${displayDiscount})\n` +
-            `Checkout pages now show a promo code field. Run \`!coupon off\` to deactivate.`
+            `No public announcement was posted. Share the code via DM or your preferred channel. ` +
+            `Run \`!coupon off\` to deactivate.`
         );
     } catch (e) {
         console.error('Coupon activate error:', e.message);
@@ -213,15 +210,10 @@ async function handleOff(message) {
 
     coupons.deactivate.run(current.id);
 
-    await sendEmbed('ANNOUNCEMENTS', {
-        title: '🏷️ Coupon Expired',
-        description: `The **\`${current.promo_code}\`** code is no longer active.`,
-        color: 0x95a5a6,
-    });
-
+    // No #announcements post — coupons are word-of-mouth. Just
+    // confirm to the operator that internal state is updated.
     await message.channel.send(
-        `🏷️ **Coupon deactivated**: \`${current.promo_code}\`\n` +
-        `Promo code field removed from checkout.`
+        `🏷️ **Coupon deactivated**: \`${current.promo_code}\``
     );
 }
 

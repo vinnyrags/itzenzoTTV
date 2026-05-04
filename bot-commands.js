@@ -209,13 +209,13 @@ const messages = [
     {
         title: '🏷️ Coupons',
         description: [
-            '**`/coupon create amount:<cents>`** — Create a Stripe coupon with the given discount.',
+            '**`/coupon create amount:<cents>`** — Create a Stripe coupon with the given discount. Bot DMs you the code; share it via DM, chat, or social as you see fit.',
             '',
             '**`/coupon off`** — Disable the active coupon.',
             '',
             '**`/coupon status`** — Show currently active coupon.',
             '',
-            '*The promo code field is always visible at checkout. For announcing a code in `#announcements`, use `/op coupon <CODE>`.*',
+            '*Coupons are word-of-mouth — no automatic announcement is posted. The promo code field is always visible at checkout for any code.*',
         ].join('\n'),
         color: 0xceff00,
     },

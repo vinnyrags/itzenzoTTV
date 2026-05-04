@@ -93,18 +93,21 @@ describe('pull box helpers', () => {
 });
 
 describe('coupon helpers', () => {
-    it('broadcastCouponDrop includes the discount string when present', () => {
-        broadcastCouponDrop('SAVE10', '10% off');
+    it('broadcastCouponDrop announces the discount without revealing the code', () => {
+        broadcastCouponDrop('10% off');
         const [event, payload] = lastCall();
         expect(event).toBe('activity.coupon.drop');
-        expect(payload.description).toBe('SAVE10 — 10% off');
+        expect(payload.description).toBe('10% off');
         expect(payload.color).toBe('rose');
+        // Word-of-mouth model: no code anywhere in the payload.
+        expect(payload.meta).toEqual({});
+        expect(JSON.stringify(payload)).not.toMatch(/SAVE|SPRING|FREESHIP/);
     });
 
-    it('falls back to bare code when description is empty', () => {
-        broadcastCouponDrop('FREESHIP', '');
+    it('falls back to a generic message when no discount is provided', () => {
+        broadcastCouponDrop('');
         const [, payload] = lastCall();
-        expect(payload.description).toBe('FREESHIP');
+        expect(payload.description).toBe('A coupon is active');
     });
 });
 
