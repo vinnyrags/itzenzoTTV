@@ -9,7 +9,10 @@
     "dev": "node --watch index.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:critical": "node bin/run-test-suite.mjs"
+    "test:critical": "node bin/run-test-suite.mjs",
+    "test:critical:droplet": "ssh root@174.138.70.29 'cd /opt/nous-bot && PATH=/root/.nvm/versions/node/v20.20.2/bin:$PATH npm run test:critical'",
+    "test:e2e:storefront": "npm --prefix ../itzenzo.tv run test:e2e:staging",
+    "test:pre-stream": "npm run test:critical:droplet && npm run test:e2e:storefront"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",
