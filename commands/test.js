@@ -1355,10 +1355,16 @@ async function runLoadTestFlow(testChannel) {
 async function runMinecraftFlow(testChannel) {
     const results = [];
     const { db, minecraft: minecraftDb } = await import('../db.js');
+    const minecraftChannel = getChannel('MINECRAFT');
 
     await testChannel.send({ embeds: [new EmbedBuilder().setTitle('🟢 Minecraft React-for-DM').setDescription('Starting...').setColor(0xceff00)] });
 
-    // --- INIT (posts the persistent embed + 3 reactions in #test-suite) ---
+    if (!minecraftChannel) {
+        await testChannel.send('⚠️ MINECRAFT channel not configured in this guild — skipping flow.');
+        return results;
+    }
+
+    // --- INIT (posts the persistent embed + 3 reactions in #minecraft) ---
     let postedMessageId;
     results.push(await step('initMinecraftChannel posts embed + reactions', async () => {
         // Reset stored message ID so init forces a fresh post
@@ -1368,12 +1374,12 @@ async function runMinecraftFlow(testChannel) {
         if (!row?.channel_message_id) throw new Error('No message ID stored after init');
         postedMessageId = row.channel_message_id;
 
-        const msg = await testChannel.messages.fetch(postedMessageId);
+        const msg = await minecraftChannel.messages.fetch(postedMessageId);
         if (!msg.embeds.length) throw new Error('Embed not posted');
 
         // Wait briefly for reactions to register, then verify all 3 are present
         await delay(1500);
-        const refreshed = await testChannel.messages.fetch(postedMessageId);
+        const refreshed = await minecraftChannel.messages.fetch(postedMessageId);
         const present = REACTION_EMOJIS.filter((e) => refreshed.reactions.cache.has(e));
         if (present.length !== REACTION_EMOJIS.length) {
             throw new Error(`Expected ${REACTION_EMOJIS.length} reactions, found ${present.length}: ${present.join(' ')}`);
@@ -1395,7 +1401,6 @@ async function runMinecraftFlow(testChannel) {
     // remove the user's reaction.
     for (const emoji of REACTION_EMOJIS) {
         results.push(await step(`handleMinecraftReaction (${emoji})`, async () => {
-            const msg = await testChannel.messages.fetch(postedMessageId);
             let reactionRemoved = false;
             const fakeReaction = {
                 emoji: { name: emoji },
@@ -1409,7 +1414,6 @@ async function runMinecraftFlow(testChannel) {
 
             await handleMinecraftReaction(fakeReaction, fakeUser);
             if (!reactionRemoved) throw new Error('Reaction not removed after handler ran');
-            void msg; // ensure compiler keeps fetch
         }));
     }
 
