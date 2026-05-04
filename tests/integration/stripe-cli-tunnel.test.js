@@ -102,10 +102,18 @@ describe.skipIf(!STRIPE_AVAILABLE)('L3 — Stripe CLI tunnel → Nous → handle
         // Fire the event. Stripe → CLI tunnel → our /webhooks/stripe.
         // We override metadata.line_items so the handler has a known shape;
         // without this Stripe's default fixture has no line_items.
+        //
+        // metadata.test=1 marks this as a test event so the production
+        // Nous instance (which receives every test-mode event because
+        // its webhook endpoint is registered with the same Stripe
+        // account) early-returns without processing or announcing.
+        // The test bootstrapper here doesn't set NODE_ENV=production,
+        // so the local Nous still processes normally for the assertion.
         triggerEvent('checkout.session.completed', {
             'checkout_session:metadata.line_items': JSON.stringify([
                 { name: 'L3 Smoke', quantity: 1, stock_remaining: 5 },
             ]),
+            'checkout_session:metadata.test': '1',
         });
 
         // The full pipeline (stripe → tunnel → Nous → handler) takes a

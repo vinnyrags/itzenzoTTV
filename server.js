@@ -77,6 +77,21 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), async (r
         event = JSON.parse(req.body);
     }
 
+    // L3 service-integration tests fire real Stripe events to exercise the
+    // full webhook pipeline. Stripe forwards every event to ALL configured
+    // endpoints — including production's. The local test instance asserts
+    // its own SQLite state; production must never process or announce.
+    // Test-fired events carry metadata.test='1' as the marker. We guard
+    // only on production (NODE_ENV='production' is set by systemd) so the
+    // local test Nous still processes normally for its assertions.
+    if (
+        process.env.NODE_ENV === 'production' &&
+        event?.data?.object?.metadata?.test === '1'
+    ) {
+        console.log(`[stripe] skipping test event ${event.id} on production`);
+        return res.sendStatus(200);
+    }
+
     // Belt-and-suspenders: dedup on event.id even before we hit any handler.
     // Stripe re-delivers events on non-2xx OR connection-timeout, and we
     // already 2xx fast — but a slow phase-1 in handleCheckoutCritical
