@@ -15,6 +15,7 @@ import { livestream, analytics, goals } from '../db.js';
 import * as queueSource from '../lib/queue-source.js';
 import { sendEmbed, sendToChannel, getGuild } from '../discord.js';
 import { postQueueChannelEmbed, updateQueueChannelEmbed } from './queue.js';
+import { settleSpeculativeBuyers, postOpsScanSummary } from '../lib/speculative-shipping.js';
 
 // =========================================================================
 // !live
@@ -145,6 +146,20 @@ async function handleOffline(message) {
     // Post analytics recap to #analytics
     await postStreamRecap(session, closedQueueId);
 
+    // Speculative-shipping settlement: scan for buyers with held items
+    // (pulls/packs/pack-battle entries) and no shipping payment for the
+    // current period; DM linked-Discord ones a Stripe shipping checkout
+    // link, list unlinked ones in #ops for manual follow-up. Dedup is
+    // built into the query — only buyers with a fresh speculative
+    // purchase since their last DM are eligible.
+    let scanSummary = null;
+    try {
+        scanSummary = await settleSpeculativeBuyers();
+        await postOpsScanSummary(scanSummary);
+    } catch (e) {
+        console.error('Speculative-shipping settlement failed:', e.message);
+    }
+
     // Confirm in current channel
     const offlineEmbed = new EmbedBuilder()
         .setTitle('📴 Live Session Ended')
@@ -154,6 +169,14 @@ async function handleOffline(message) {
         )
         .setColor(0x95a5a6)
         .setFooter({ text: 'Stream recap posted to #analytics' });
+
+    if (scanSummary) {
+        offlineEmbed.addFields({
+            name: 'Held-shipping DM scan',
+            value: `📨 ${scanSummary.dmed.length} DM'd · 🔗 ${scanSummary.unlinked.length} unlinked${scanSummary.errors.length ? ` · ⚠️ ${scanSummary.errors.length} errors` : ''}`,
+            inline: false,
+        });
+    }
 
     await message.channel.send({ embeds: [offlineEmbed] });
 }

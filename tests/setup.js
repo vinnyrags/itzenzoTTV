@@ -28,8 +28,17 @@ export function createTestDb() {
             shippingeasy_canceled_at TEXT DEFAULT NULL,
             refunded_at TEXT DEFAULT NULL,
             refund_amount INTEGER DEFAULT NULL,
-            refund_reason TEXT DEFAULT NULL
+            refund_reason TEXT DEFAULT NULL,
+            source TEXT DEFAULT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS speculative_shipping_dms (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_email TEXT NOT NULL,
+            sent_at TEXT DEFAULT (datetime('now')),
+            period_start TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_spec_dms_email_sent ON speculative_shipping_dms (customer_email, sent_at);
 
         CREATE TABLE IF NOT EXISTS processed_stripe_events (
             event_id TEXT PRIMARY KEY,
@@ -249,6 +258,7 @@ export function buildStmts(db) {
     return {
         purchases: {
             insertPurchase: db.prepare(`INSERT OR IGNORE INTO purchases (stripe_session_id, discord_user_id, customer_email, product_name, amount) VALUES (?, ?, ?, ?, ?)`),
+            insertPurchaseWithSource: db.prepare(`INSERT OR IGNORE INTO purchases (stripe_session_id, discord_user_id, customer_email, product_name, amount, source) VALUES (?, ?, ?, ?, ?, ?)`),
             getPurchaseCount: db.prepare(`SELECT total_purchases FROM purchase_counts WHERE discord_user_id = ?`),
             incrementPurchaseCount: db.prepare(`INSERT INTO purchase_counts (discord_user_id, total_purchases) VALUES (?, 1) ON CONFLICT(discord_user_id) DO UPDATE SET total_purchases = total_purchases + 1`),
             getDiscordIdByEmail: db.prepare(`SELECT discord_user_id FROM discord_links WHERE customer_email = ?`),

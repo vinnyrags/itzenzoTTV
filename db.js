@@ -304,6 +304,27 @@ try { db.exec(`ALTER TABLE giveaways ADD COLUMN is_social INTEGER DEFAULT 0`); }
 try { db.exec(`ALTER TABLE giveaways ADD COLUMN social_link TEXT`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE giveaway_entries ADD COLUMN tiktok_username TEXT`); } catch { /* exists */ }
 
+// Add source column to purchases for speculative-vs-committed tracking.
+// Populated from Stripe metadata.source — 'pull_box' / 'speculative' /
+// 'pack_battle' identify items that don't auto-include shipping at
+// checkout. NULL means committed (existing behavior).
+try { db.exec(`ALTER TABLE purchases ADD COLUMN source TEXT DEFAULT NULL`); } catch { /* exists */ }
+
+// Speculative-purchase shipping DM log. One row per DM sent at /offline
+// to a buyer with held items. Used to dedup: only DM after a fresh
+// speculative purchase since the last DM. Period_start is the start of
+// the buyer's shipping period (Monday for US, first of month for intl)
+// so cross-period DMs are tracked separately.
+db.exec(`
+    CREATE TABLE IF NOT EXISTS speculative_shipping_dms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_email TEXT NOT NULL,
+        sent_at TEXT DEFAULT (datetime('now')),
+        period_start TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_spec_dms_email_sent ON speculative_shipping_dms (customer_email, sent_at);
+`);
+
 // Store full shipping address and ShippingEasy order link on purchases (v11)
 // Add max_quantity for pull box stock caps (v12)
 try { db.exec(`ALTER TABLE card_listings ADD COLUMN max_quantity INTEGER DEFAULT NULL`); } catch { /* exists */ }
@@ -341,6 +362,65 @@ const stmts = {
     insertPurchase: db.prepare(`
         INSERT OR IGNORE INTO purchases (stripe_session_id, discord_user_id, customer_email, product_name, amount)
         VALUES (?, ?, ?, ?, ?)
+    `),
+
+    /**
+     * Speculative-aware insert. Same shape as insertPurchase plus the
+     * source column ('pull_box' / 'speculative' / 'pack_battle' / NULL).
+     * The /offline shipping-DM scan keys off the source column to find
+     * buyers with held items who haven't paid for the period.
+     */
+    insertPurchaseWithSource: db.prepare(`
+        INSERT OR IGNORE INTO purchases (stripe_session_id, discord_user_id, customer_email, product_name, amount, source)
+        VALUES (?, ?, ?, ?, ?, ?)
+    `),
+
+    /**
+     * Speculative-shipping DM dedup. Looks up the most recent DM sent
+     * to this email (any period). The /offline scan compares this
+     * timestamp against the most recent speculative purchase to decide
+     * whether to send a fresh DM.
+     */
+    getLastSpeculativeDm: db.prepare(`
+        SELECT sent_at FROM speculative_shipping_dms
+        WHERE customer_email = ?
+        ORDER BY sent_at DESC LIMIT 1
+    `),
+
+    insertSpeculativeDm: db.prepare(`
+        INSERT INTO speculative_shipping_dms (customer_email, period_start)
+        VALUES (?, ?)
+    `),
+
+    /**
+     * Find buyers eligible for a speculative-shipping DM right now.
+     * Eligibility:
+     *   1. They have at least one purchase with source IN ('pull_box',
+     *      'speculative', 'pack_battle') OR an unconfirmed pull-box slot
+     *      claim for an active box.
+     *   2. They haven't paid shipping for the current period (NOT IN the
+     *      shipping_payments-this-period subquery).
+     *   3. Their most recent speculative purchase is newer than their
+     *      most recent DM (or they've never been DM'd).
+     *
+     * The query unions purchases.source matches AND pull_box_slots
+     * confirmed claims (since pull-box buys are also recorded as
+     * purchases, but we keep both paths for resilience).
+     */
+    getSpeculativeBuyersNeedingDm: db.prepare(`
+        SELECT DISTINCT p.customer_email AS email
+        FROM purchases p
+        WHERE p.source IN ('pull_box', 'speculative', 'pack_battle')
+          AND p.customer_email IS NOT NULL
+          AND p.created_at >= datetime('now', '-31 days')
+          AND p.created_at > COALESCE(
+              (SELECT MAX(sent_at) FROM speculative_shipping_dms d WHERE d.customer_email = p.customer_email),
+              '1970-01-01'
+          )
+          AND p.customer_email NOT IN (
+              SELECT customer_email FROM shipping_payments
+              WHERE created_at >= datetime('now', '-5 hours', 'start of day', 'weekday 1', '-7 days', '+5 hours')
+          )
     `),
 
     getPurchaseCount: db.prepare(`

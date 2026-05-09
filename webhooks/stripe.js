@@ -100,15 +100,33 @@ async function handleCheckoutCritical(session) {
     // inserts so the role-threshold counter only ticks up when at least
     // one new purchase row landed (otherwise a retry would over-promote
     // the buyer through the Xipe / Long thresholds).
+    // Carry session.metadata.source into each purchase row so the
+    // /offline speculative-shipping scan can identify buyers who owe
+    // shipping. 'pull_box' / 'speculative' / 'pack_battle' = held;
+    // NULL (default) = committed (shipping was charged at checkout).
+    // Use the source-aware insert only when source is set; the legacy
+    // 5-arg insertPurchase stays for committed orders so existing test
+    // fixtures don't need to know about the new column.
+    const source = session.metadata?.source || null;
+
     let actuallyInserted = 0;
     for (const item of lineItems) {
-        const result = purchases.insertPurchase.run(
-            session.id,
-            discordUserId,
-            customerEmail,
-            item.name || 'Unknown Product',
-            totalAmount
-        );
+        const result = source
+            ? purchases.insertPurchaseWithSource.run(
+                session.id,
+                discordUserId,
+                customerEmail,
+                item.name || 'Unknown Product',
+                totalAmount,
+                source
+            )
+            : purchases.insertPurchase.run(
+                session.id,
+                discordUserId,
+                customerEmail,
+                item.name || 'Unknown Product',
+                totalAmount
+            );
         actuallyInserted += result.changes;
     }
 
