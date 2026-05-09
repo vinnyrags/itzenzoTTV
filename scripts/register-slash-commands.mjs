@@ -145,17 +145,14 @@ const commands = [
         .setDescription('Link your email to your Discord ID for purchase tracking')
         .addStringOption((o) => o.setName('email').setDescription('Email used at checkout').setRequired(true)),
 
-    // /pull — pull-box admin
+    // /pull — pull-box admin (perpetual single-box model)
     new SlashCommandBuilder()
         .setName('pull')
-        .setDescription('Pull-box lifecycle')
+        .setDescription('Pull-box admin (chase-hit reset + replenish only)')
         .setDefaultMemberPermissions(ADMIN_ONLY)
-        .addSubcommand((s) => s.setName('open').setDescription('Open a pull box')
-            .addStringOption((o) => o.setName('args').setDescription('"Box Name" <total_slots>')))
-        .addSubcommand((s) => s.setName('close').setDescription('Close the active pull box'))
-        .addSubcommand((s) => s.setName('replenish').setDescription('Add slots to the active pull box')
-            .addStringOption((o) => o.setName('args').setDescription('Slots to add')))
-        .addSubcommand((s) => s.setName('status').setDescription('Show current pull-box status')),
+        .addSubcommand((s) => s.setName('reset').setDescription('Chase prize hit — close current box and start a fresh batch'))
+        .addSubcommand((s) => s.setName('replenish').setDescription('Add N slots to the active pull box without resetting')
+            .addStringOption((o) => o.setName('args').setDescription('Slots to add (e.g., 25)'))),
 
     // /giveaway — giveaway lifecycle
     new SlashCommandBuilder()

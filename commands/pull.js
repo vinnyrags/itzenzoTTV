@@ -1,23 +1,21 @@
 /**
- * Pull Box Command — !pull / /pull
+ * Pull Box Command — /pull
  *
- * Owner-only. Opens, closes, and reports on pull boxes — finite-slot
- * livestream entry pools backed by the WordPress source-of-truth
- * tables (`wp_pull_boxes` + `wp_pull_box_slots`). The Discord embed and
- * the itzenzo.tv homepage modal both project from the same data.
+ * Owner-only. The pull box is perpetual — it always exists, auto-created
+ * from settings (`pb_price_id`, `pb_total_slots`) the first time the
+ * homepage modal hits `/shop/v1/pull-boxes/active`. The operator never
+ * has to "open" a box; they just manage two events:
  *
- * Single-box model — only one pull box is open at a time. Price comes
- * from the WP `pb_price_id` setting (a Stripe price ID lookup); Nous
- * doesn't need to know the dollar amount up front.
+ *   /pull reset             — chase prize hit, close the current box and
+ *                              open a fresh one with the configured slot count
+ *   /pull replenish <N>     — add N slots to the active box without resetting
+ *                              (for the rare "running low, no chase yet" case)
  *
- * Syntax:
- *   /pull "Box Name" 50          — open a 50-slot box at the configured price
- *   /pull close                  — close the active box
- *   /pull replenish 25           — add 25 slots to the active box
- *   /pull status                 — show the active box state
+ * Manual slot creation, naming, and per-stream lifecycle are gone — the
+ * homepage Buy button + Discord persistent embed both stay live always.
  */
 
-import { EmbedBuilder, ButtonBuilder, ButtonStyle, ActionRowBuilder } from 'discord.js';
+import { ButtonBuilder, ButtonStyle, ActionRowBuilder, EmbedBuilder } from 'discord.js';
 import config from '../config.js';
 import * as queueSource from '../lib/queue-source.js';
 import * as wpPullBox from '../lib/wp-pull-box.js';
@@ -40,140 +38,56 @@ async function handlePull(message, args) {
 
     const sub = (args[0] || '').toLowerCase();
 
-    if (sub === 'close') return handlePullClose(message);
+    if (sub === 'reset') return handlePullReset(message);
     if (sub === 'replenish') return handlePullReplenish(message, args.slice(1));
-    if (sub === 'status') return handlePullStatus(message);
 
-    return handlePullOpen(message, args);
+    return message.reply('Usage: `/pull reset` (chase hit, start fresh batch) or `/pull replenish <slots>` (top up the active box).');
 }
 
 // ===========================================================================
-// /pull open
+// /pull reset — close current + open new
 // ===========================================================================
 
-async function handlePullOpen(message, args) {
-    const parsed = parseOpenArgs(message.content);
-    if (parsed.error) return message.reply(parsed.error);
-
-    const { name, totalSlots, priceCents } = parsed;
-
-    // Refuse if a box is already open — single-box model.
-    let existing = null;
+async function handlePullReset(message) {
+    let result;
     try {
-        existing = await wpPullBox.getActiveBox();
+        const res = await fetch(`${config.SITE_URL}/wp-json/shop/v1/pull-boxes/reset`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Bot-Secret': config.LIVESTREAM_SECRET },
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            return message.reply(`Failed to reset: ${data.message || data.code || res.statusText}`);
+        }
+        result = data.box;
     } catch (e) {
         return message.reply(`Could not reach the pull-box service: ${e.message}`);
     }
-    if (existing) {
-        return message.reply(`A pull box is already active: **${existing.name}** (#${existing.id}). Close it first with \`/pull close\`.`);
-    }
 
-    let box;
-    try {
-        box = await wpPullBox.createBox({ name, priceCents, totalSlots });
-    } catch (e) {
-        return message.reply(`Failed to open box: ${e.message}`);
-    }
-
+    // Post a fresh embed for the new box
     const channel = getChannel('CARD_SHOP');
-    if (!channel) {
-        return message.reply('Card-shop channel not found. Box was created in WP but no embed posted.');
+    if (channel && result) {
+        const embed = buildPullBoxEmbed(result, []);
+        const buyButton = new ButtonBuilder()
+            .setCustomId('pull-buy')
+            .setLabel('Buy Pull(s)')
+            .setStyle(ButtonStyle.Primary)
+            .setEmoji('🎰');
+        const row = new ActionRowBuilder().addComponents(buyButton);
+
+        const msg = await channel.send({ embeds: [embed], components: [row] });
+        try {
+            await wpPullBox.updateBox(result.id, { discordMessageId: msg.id });
+        } catch (e) {
+            console.error('Failed to attach discord_message_id to reset pull box:', e.message);
+        }
     }
 
-    const embed = buildPullBoxEmbed(box, []);
-    const buyButton = new ButtonBuilder()
-        .setCustomId('pull-buy')
-        .setLabel('Buy Pull(s)')
-        .setStyle(ButtonStyle.Primary)
-        .setEmoji('🎰');
-    const row = new ActionRowBuilder().addComponents(buyButton);
-
-    const msg = await channel.send({ embeds: [embed], components: [row] });
-
-    try {
-        await wpPullBox.updateBox(box.id, { discordMessageId: msg.id });
-    } catch (e) {
-        console.error('Failed to attach discord_message_id to pull box:', e.message);
+    if (message.channel.id !== (channel?.id || '')) {
+        await message.channel.send(`🎰 Pull box reset — fresh box **#${result.id}** with ${result.totalSlots} slots is live in <#${config.CHANNELS.CARD_SHOP}>!`);
     }
 
-    if (message.channel.id !== channel.id) {
-        await message.channel.send(`🎰 Pull box **${name}** ($${(priceCents / 100).toFixed(2)} × ${totalSlots} slots) is live in <#${config.CHANNELS.CARD_SHOP}>!`);
-    }
-
-    broadcastPullBoxOpened(box);
-}
-
-/**
- * Parse `/pull "Box Name" <total_slots>` or the legacy
- * `!pull "Box Name" <price> <total_slots>` form. Returns either
- * { name, totalSlots, priceCents } or { error: string }.
- *
- * Price is normally not specified — falls back to the box's own
- * Stripe price metadata which WP applies from `pb_price_id`. We default
- * to 500 cents ($5) when price is omitted so the embed shows something
- * sensible up front; WP overrides at the source of truth.
- */
-function parseOpenArgs(rawContent) {
-    const content = rawContent.replace(/^!pull\s+/i, '').replace(/^\/pull\s+/i, '').trim();
-
-    const nameMatch = content.match(/"([^"]+)"/);
-    if (!nameMatch) {
-        return { error: 'Usage: `/pull "Box Name" <total_slots>` (e.g. `/pull "Vintage Box" 50`)' };
-    }
-    const name = nameMatch[1];
-    const afterQuote = content.slice(content.lastIndexOf('"') + 1).trim();
-    const numbers = afterQuote.match(/[\d]+(?:\.[\d]{1,2})?/g) || [];
-
-    let priceCents = 500; // default $5
-    let totalSlots;
-
-    if (numbers.length === 1) {
-        // /pull "Name" <slots>
-        totalSlots = parseInt(numbers[0], 10);
-    } else if (numbers.length >= 2) {
-        // Legacy: /pull "Name" <price> <slots>
-        priceCents = Math.round(parseFloat(numbers[0]) * 100);
-        totalSlots = parseInt(numbers[1], 10);
-    } else {
-        return { error: 'Usage: `/pull "Box Name" <total_slots>` — total slots required.' };
-    }
-
-    if (!Number.isFinite(totalSlots) || totalSlots < 1) {
-        return { error: 'Total slots must be a positive integer.' };
-    }
-    if (!Number.isFinite(priceCents) || priceCents < 1) {
-        return { error: 'Price must be a positive number.' };
-    }
-    return { name, totalSlots, priceCents };
-}
-
-// ===========================================================================
-// /pull close
-// ===========================================================================
-
-async function handlePullClose(message) {
-    let target;
-    try {
-        target = await wpPullBox.getActiveBox();
-    } catch (e) {
-        return message.reply(`Could not reach the pull-box service: ${e.message}`);
-    }
-
-    if (!target) {
-        return message.reply('No active pull box to close.');
-    }
-
-    try {
-        await wpPullBox.closeBox(target.id);
-    } catch (e) {
-        return message.reply(`Failed to close box: ${e.message}`);
-    }
-
-    await refreshBoxEmbed(target.id, { closed: true }).catch(() => {});
-
-    await message.channel.send(`🎰 Pull box **${target.name}** closed.`);
-
-    broadcastPullBoxClosed(target);
+    broadcastPullBoxOpened(result);
 }
 
 // ===========================================================================
@@ -194,7 +108,7 @@ async function handlePullReplenish(message, args) {
     }
 
     if (!target) {
-        return message.reply('No active pull box to replenish.');
+        return message.reply('No active pull box to replenish. Run `/pull reset` to start a fresh one.');
     }
 
     const newTotal = target.totalSlots + amount;
@@ -209,26 +123,6 @@ async function handlePullReplenish(message, args) {
     await message.channel.send(`📈 Added ${amount} slots to **${target.name}** (${target.totalSlots} → ${newTotal}).`);
 
     broadcastPullBoxReplenished(target, amount, newTotal);
-}
-
-// ===========================================================================
-// /pull status
-// ===========================================================================
-
-async function handlePullStatus(message) {
-    let target;
-    try {
-        target = await wpPullBox.getActiveBox();
-    } catch (e) {
-        return message.reply(`Could not reach the pull-box service: ${e.message}`);
-    }
-
-    if (!target) {
-        return message.reply('No active pull box.');
-    }
-
-    const claimed = (target.claimedSlots || []).length;
-    await message.reply(`🎰 **${target.name}** ($${(target.priceCents / 100).toFixed(2)}) — ${claimed}/${target.totalSlots} slots claimed`);
 }
 
 // ===========================================================================
@@ -285,19 +179,16 @@ function buildPullBoxEmbed(box, claimedSlots) {
 
 /**
  * Re-fetch the active box from WP and edit its #card-shop embed in
- * place. Called after slot claims, replenish, and close events so the
- * embed stays current without depending on Nous's local state.
+ * place. Called after slot claims and replenish so the embed stays
+ * current without depending on Nous's local state.
  */
-async function refreshBoxEmbed(boxId, { closed = false } = {}) {
+async function refreshBoxEmbed(boxId) {
     try {
         const channel = getChannel('CARD_SHOP');
         if (!channel) return;
 
         const boxRow = await wpPullBox.getActiveBox();
         if (!boxRow || boxRow.id !== boxId) {
-            // Either the box was closed or another box took its place.
-            // The closed-state embed update only matters when we still
-            // have a row to render — skip if not.
             return;
         }
 
@@ -337,9 +228,6 @@ async function refreshBoxEmbed(boxId, { closed = false } = {}) {
  *      stripe_session_id.
  *   2. Discord flow: no pre-claim. We auto-pick the lowest-numbered
  *      open slots, claim atomically, then immediately confirm.
- *
- * Either way, the result is N confirmed slot rows in WP and a queue
- * entry mirroring the buy.
  */
 async function recordPullBoxPurchase({
     stripeSessionId,
@@ -460,5 +348,11 @@ async function recordPullBoxPurchase({
 async function recordPullPurchase(_listingId, _discordUserId = null, _customerEmail = null, _quantity = 1, _stripeSessionId = null) {
     console.warn('recordPullPurchase (legacy) called — listing-based pull boxes are deprecated. Migrate caller to recordPullBoxPurchase.');
 }
+
+// Avoid unused-import warning — broadcastPullBoxClosed is wired up via the
+// reset endpoint's WP-side hook (`shop_pull_box_closed` action) which posts
+// to the activity feed bridge. Re-imported here for completeness so future
+// callers can wire it back into a /pull command if needed.
+void broadcastPullBoxClosed;
 
 export { handlePull, recordPullPurchase, recordPullBoxPurchase, refreshBoxEmbed };
