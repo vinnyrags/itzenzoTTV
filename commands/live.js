@@ -74,7 +74,7 @@ async function handleLive(message) {
         .setTitle('🔴 We\'re Live!')
         .setDescription(
             `Card night is starting! Come hang.\n\n` +
-            `Watch on: [Twitch](https://twitch.tv/itzenzoTTV) · [TikTok](https://tiktok.com/@itzenzoTTV) · [Instagram](https://instagram.com/itzenzo.TTV) · [YouTube](https://youtube.com/@itzenzoTTV)`
+            `Watch on: [TikTok](https://tiktok.com/@itzenzoTTV) · [Instagram](https://instagram.com/itzenzo.TTV)`
         )
         .setColor(0xceff00);
 

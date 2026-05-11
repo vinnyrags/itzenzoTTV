@@ -107,7 +107,7 @@ const messages = [
             'Single card-night stream. Mon, Tue, Wed at 8PM EST. All vibes-based — no hard clock.',
             '',
             '**Card Night (Pokemon + Anime)**',
-            'Simulcast: Twitch + YouTube (OBS) and TikTok + Instagram (iPad)',
+            'Simulcast: TikTok + Instagram (iPad). Twitch + YouTube (OBS) return when the external camera is back.',
             '```',
             'Open           → Welcome, tonight\'s lineup, show products, hype chat',
             'Pokemon        → Pack openings, product showcase, pack battles',

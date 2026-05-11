@@ -177,14 +177,13 @@ async function handleHype(message, args) {
     const embed = new EmbedBuilder()
         .setTitle('🎬 Card Night Tonight!')
         .setDescription(
-            `Going live tonight at **8 PM EST** on Twitch, YouTube, TikTok, and Instagram.\n\n` +
+            `Going live tonight at **8 PM EST** on TikTok and Instagram.\n\n` +
             `We're kicking things off with Pokemon, rolling into anime, with pack battles in between and closing out with the duck race.\n\n` +
             `Here's what I've got my eye on tonight:\n\n` +
             productLines.join('\n\n') +
-            `\n\n🛒 **[Browse the full shop](${config.SHOP_URL})**\n` +
-            `👉 [Watch on Twitch](https://twitch.tv/itzenzoTTV) when we go live!`
+            `\n\n🛒 **[Browse the full shop](${config.SHOP_URL})**`
         )
-        .setColor(0x9146ff)
+        .setColor(0xceff00)
         .setFooter({ text: 'Shipping: $10 US / $25 International — purchases go into the queue + duck race!' });
 
     // Build "Buy Now" buttons for each product
