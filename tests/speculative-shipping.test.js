@@ -99,6 +99,43 @@ describe('buildDmText', () => {
     });
 });
 
+// Parity copy of the buildShippingSummary helper exported from
+// lib/speculative-shipping.js. Matching the existing pattern in this
+// file — the real module imports discord.js at top-level which throws
+// in test context, so we shape-test a copy. If the production helper
+// drifts from this, both the parity copy AND the production helper
+// need updating.
+function buildShippingSummary(dmedCount, unlinkedCount) {
+    const parts = [];
+    if (dmedCount > 0) {
+        parts.push(`${dmedCount} ${dmedCount === 1 ? 'buyer' : 'buyers'} DM'd`);
+    }
+    if (unlinkedCount > 0) {
+        parts.push(`${unlinkedCount} pending email follow-up`);
+    }
+    return parts.join(', ') + '.';
+}
+
+describe('buildShippingSummary — Activity Feed copy for /offline', () => {
+    it('uses singular "buyer" when exactly one was DMed', () => {
+        expect(buildShippingSummary(1, 0)).toBe("1 buyer DM'd.");
+    });
+
+    it('uses plural "buyers" when more than one was DMed', () => {
+        expect(buildShippingSummary(3, 0)).toBe("3 buyers DM'd.");
+    });
+
+    it('mentions the email follow-up bucket when unlinked buyers exist', () => {
+        expect(buildShippingSummary(2, 1)).toBe(
+            "2 buyers DM'd, 1 pending email follow-up.",
+        );
+    });
+
+    it('shows only the unlinked count when no DMs went out', () => {
+        expect(buildShippingSummary(0, 4)).toBe('4 pending email follow-up.');
+    });
+});
+
 // =========================================================================
 // Dedup query tests — getSpeculativeBuyersNeedingDm
 // =========================================================================
