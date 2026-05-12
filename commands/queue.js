@@ -599,8 +599,23 @@ function buildQueueDescription(entries, uniqueBuyers) {
     if (!entries.length) return 'No entries yet.';
 
     const lines = entries.map((entry, i) => {
-        const key = entry.discord_user_id || entry.customer_email || 'Unknown';
-        const label = key === 'Unknown' ? key : /^\d+$/.test(key) ? `<@${key}>` : key;
+        // Prefer a Discord @-mention (user_id) so the embed pings the buyer.
+        // Fall back to a plain @handle when only the username is known —
+        // this is the RTS case: the buyer typed their Discord username on
+        // the website form but didn't OAuth-link, so we can't mention them
+        // but we still know who they are. Email is the last resort and
+        // intentionally not preferred when a handle exists (less private
+        // and less recognizable in a livestream context).
+        let label;
+        if (entry.discord_user_id) {
+            label = `<@${entry.discord_user_id}>`;
+        } else if (entry.discord_handle) {
+            label = `@${entry.discord_handle}`;
+        } else if (entry.customer_email) {
+            label = entry.customer_email;
+        } else {
+            label = 'Unknown';
+        }
         const productLabel = entry.product_name || entry.detail_label || 'Entry';
         const qty = entry.quantity || 1;
         // Consolidated multi-item labels (e.g. "4x Booster Pack, 1x Box")
