@@ -12,7 +12,7 @@
 import express from 'express';
 import Stripe from 'stripe';
 import config from './config.js';
-import { battles, cardListings, purchases, discordLinks, stripeEvents } from './db.js';
+import { battles, cardListings, purchases, discordLinks, stripeEvents, activityEvents } from './db.js';
 import {
     handleCheckoutCritical,
     handleCheckoutNotifications,
@@ -394,6 +394,37 @@ app.post('/webhooks/card-offer-received', express.json({ limit: '64kb' }), async
         await handleCardOffer({ data, client: discordClient });
     } catch (e) {
         console.error('card-offer dispatch failed:', e.message);
+    }
+});
+
+// Backfill endpoint for the itzenzo.tv homepage Activity Feed. Returns
+// the most-recent `limit` persisted events (default 50, capped at 200)
+// in chronological order — most recent FIRST, matching the frontend's
+// expected ordering. Public read-only; rate limits handled by the
+// frontend's natural cache behavior (only fires on page mount).
+//
+// Persistence happens in lib/queue-broadcaster.js's broadcast(): every
+// event flowing through SSE is also written to the activity_events
+// SQLite table. So this endpoint is the canonical answer to "what
+// happened that the feed missed because the bot restarted / the buyer
+// just opened the page".
+app.get('/activity/recent', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const requested = parseInt(String(req.query.limit ?? ''), 10);
+    const limit = Number.isFinite(requested) && requested > 0
+        ? Math.min(requested, 200)
+        : 50;
+    try {
+        const rows = activityEvents.recent.all(limit);
+        const events = rows.map((row) => {
+            let data = {};
+            try { data = JSON.parse(row.data || '{}'); } catch { /* fall through to empty */ }
+            return { id: row.id, event: row.event, data, createdAt: row.created_at };
+        });
+        res.json({ events });
+    } catch (e) {
+        console.error('activity/recent query failed:', e.message);
+        res.status(500).json({ error: 'activity feed unavailable' });
     }
 });
 

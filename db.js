@@ -213,6 +213,28 @@ db.exec(`
     );
     CREATE INDEX IF NOT EXISTS idx_tos_user_version
         ON discord_tos_acceptances(discord_user_id, terms_version);
+
+    -- Persistent log of every activity-feed broadcast. Capture happens
+    -- in queue-broadcaster.js's broadcast() before SSE fan-out, so a
+    -- single write covers every event kind (queue mutations, pull-box
+    -- lifecycle, battle entries/wins, coupon drops, community goals,
+    -- stock alerts, Discord/Minecraft joins, card offers, bundle
+    -- alerts, cards restocked, shipping settled). Without this, the
+    -- itzenzo.tv homepage feed used to wipe on every page reload AND
+    -- on every Nous restart — events were only ever in-memory.
+    --
+    -- /activity/recent reads from this table to backfill the feed on
+    -- page mount; live SSE takes over from there. The frontend keeps
+    -- its 50-item visible cap; we keep server history unbounded for
+    -- now (SQLite handles years of activity events trivially).
+    CREATE TABLE IF NOT EXISTS activity_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event TEXT NOT NULL,
+        data TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_activity_events_created_at
+        ON activity_events(created_at DESC);
 `);
 
 // =========================================================================
@@ -1143,6 +1165,24 @@ const stripeEventStmts = {
     pruneOlderThan: db.prepare(`DELETE FROM processed_stripe_events WHERE received_at < datetime('now', ?)`),
 };
 
+const activityEventStmts = {
+    /** Record a broadcast event. Called from queue-broadcaster.js so a
+     *  single capture point covers queue mutations + envelope events. */
+    insert: db.prepare(`
+        INSERT INTO activity_events (event, data)
+        VALUES (?, ?)
+    `),
+    /** Most-recent-first list of activity events for the homepage feed
+     *  backfill on page mount. limit defaults to 50 at the call site
+     *  (matches ACTIVITY_FEED_CAP on the frontend). */
+    recent: db.prepare(`
+        SELECT id, event, data, created_at
+        FROM activity_events
+        ORDER BY id DESC
+        LIMIT ?
+    `),
+};
+
 const tosAcceptanceStmts = {
     /** Does this Discord user have an acceptance row for this version? */
     has: db.prepare(`
@@ -1189,4 +1229,5 @@ export {
     trackingStmts as tracking,
     stripeEventStmts as stripeEvents,
     tosAcceptanceStmts as tosAcceptances,
+    activityEventStmts as activityEvents,
 };
