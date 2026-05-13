@@ -302,8 +302,19 @@ export function buildStmts(db) {
             getActiveQueue: db.prepare(`SELECT * FROM queues WHERE status = 'open' ORDER BY created_at DESC LIMIT 1`),
             getQueueById: db.prepare(`SELECT * FROM queues WHERE id = ?`),
             closeQueue: db.prepare(`UPDATE queues SET status = 'closed', closed_at = datetime('now') WHERE id = ?`),
-            claimForRace: db.prepare(`UPDATE queues SET status = 'racing' WHERE id = ? AND status IN ('open', 'closed')`),
-            setDuckRaceWinner: db.prepare(`UPDATE queues SET status = 'complete', duck_race_winner_id = ? WHERE id = ?`),
+            // Race claim is now an existence check — it no longer
+            // transitions the session to 'racing'. Operator can run
+            // multiple ad-hoc races on the same session; status stays
+            // tied to queue lifecycle (open/closed via /offline). The
+            // stmt is a no-op UPDATE that always succeeds when the
+            // row exists, mirroring the WP-side wp-queue.js shape.
+            claimForRace: db.prepare(`UPDATE queues SET id = id WHERE id = ?`),
+            // Winner is just a field — race no longer toggles status.
+            // Mirrors the WP-side setDuckRaceWinner: only the winner
+            // column is touched. The queue's open/closed lifecycle is
+            // operator-controlled (via /offline or /queue close),
+            // independent of how many ad-hoc races run on it.
+            setDuckRaceWinner: db.prepare(`UPDATE queues SET duck_race_winner_id = ? WHERE id = ?`),
             addEntry: db.prepare(`INSERT INTO queue_entries (queue_id, discord_user_id, customer_email, product_name, quantity, stripe_session_id) VALUES (?, ?, ?, ?, ?, ?)`),
             getEntries: db.prepare(`SELECT * FROM queue_entries WHERE queue_id = ? ORDER BY created_at ASC`),
             getUniqueBuyers: db.prepare(`SELECT DISTINCT COALESCE(discord_user_id, customer_email) AS buyer FROM queue_entries WHERE queue_id = ?`),

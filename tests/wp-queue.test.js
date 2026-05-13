@@ -169,39 +169,43 @@ describe('createQueue', () => {
 });
 
 describe('claimForRace', () => {
-    it('returns changes=0 when session is not open', async () => {
-        globalThis.fetch.mockResolvedValueOnce(mockJson({
-            session: {
-                id: 1, status: 'closed', channelMessageId: null, duckRaceWinnerUserId: null,
-                createdAt: '2026-04-27T10:00:00Z', closedAt: '2026-04-27T11:00:00Z',
-            },
-        }));
-
-        const result = await wpQueue.claimForRace(1);
-        expect(result.changes).toBe(0);
-    });
-
-    it('returns changes=1 after PATCHing status=racing', async () => {
-        globalThis.fetch
-            .mockResolvedValueOnce(mockJson({
+    // Race claim is now an existence check only — it no longer
+    // atomically transitions the session to 'racing' status. The race
+    // is operator-controlled (admin slash command); the operator may
+    // legitimately re-run a race after a winner was declared, run
+    // mid-stream with an open queue, or run multiple ad-hoc races on
+    // the same session. claimForRace just confirms the session exists.
+    it('returns changes=1 when the session exists, regardless of status', async () => {
+        for (const status of ['open', 'closed', 'racing', 'complete']) {
+            globalThis.fetch.mockResolvedValueOnce(mockJson({
                 session: {
-                    id: 1, status: 'open', channelMessageId: null, duckRaceWinnerUserId: null,
-                    createdAt: '2026-04-27T10:00:00Z', closedAt: null,
-                },
-            }))
-            .mockResolvedValueOnce(mockJson({
-                session: {
-                    id: 1, status: 'racing', channelMessageId: null, duckRaceWinnerUserId: null,
+                    id: 1, status, channelMessageId: null, duckRaceWinnerUserId: null,
                     createdAt: '2026-04-27T10:00:00Z', closedAt: null,
                 },
             }));
+            const result = await wpQueue.claimForRace(1);
+            expect(result.changes).toBe(1);
+        }
+    });
 
-        const result = await wpQueue.claimForRace(1);
-        expect(result.changes).toBe(1);
+    it('returns changes=0 when the session does not exist (404)', async () => {
+        globalThis.fetch.mockRejectedValueOnce(Object.assign(new Error('not found'), { status: 404 }));
+        const result = await wpQueue.claimForRace(999);
+        expect(result.changes).toBe(0);
+    });
 
-        const patchCall = globalThis.fetch.mock.calls[1];
-        expect(patchCall[1].method).toBe('PATCH');
-        expect(JSON.parse(patchCall[1].body)).toEqual({ status: 'racing' });
+    it('does NOT PATCH status — race no longer changes session lifecycle', async () => {
+        globalThis.fetch.mockResolvedValueOnce(mockJson({
+            session: {
+                id: 1, status: 'open', channelMessageId: null, duckRaceWinnerUserId: null,
+                createdAt: '2026-04-27T10:00:00Z', closedAt: null,
+            },
+        }));
+        await wpQueue.claimForRace(1);
+        // Only one call (the existence check). No PATCH follows.
+        expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+        const call = globalThis.fetch.mock.calls[0];
+        expect(call[1]?.method).not.toBe('PATCH');
     });
 });
 

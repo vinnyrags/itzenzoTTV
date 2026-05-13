@@ -196,7 +196,11 @@ describe('queue lifecycle database operations', () => {
         expect(uniqueBuyers).toHaveLength(2);
     });
 
-    it('duck race winner assignment', () => {
+    it('duck race winner assignment (does not change queue status)', () => {
+        // Race is decoupled from queue lifecycle — winner column is
+        // set, status stays whatever the queue was already in. The
+        // queue can be open mid-race (mid-stream race), closed (post-
+        // /offline race), or anything else; the race doesn't toggle.
         stmts.queues.createQueue.run();
         const q = stmts.queues.getActiveQueue.get();
         stmts.queues.addEntry.run(q.id, 'winner1', 'w@e.com', 'Card', 1, 'cs_1');
@@ -205,7 +209,7 @@ describe('queue lifecycle database operations', () => {
         stmts.queues.setDuckRaceWinner.run('winner1', q.id);
 
         const updated = stmts.queues.getQueueById.get(q.id);
-        expect(updated.status).toBe('complete');
+        expect(updated.status).toBe('closed');
         expect(updated.duck_race_winner_id).toBe('winner1');
     });
 

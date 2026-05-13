@@ -113,40 +113,46 @@ describe('giveaway entry deduplication', () => {
 });
 
 // =========================================================================
-// #5: Duck race — atomic claimForRace
+// #5: Duck race — race claim is now permissive (no atomic gate)
+//
+// Originally claimForRace atomically transitioned the session from 'open'
+// → 'racing' to prevent two operators from accidentally double-starting
+// a race. The race is now operator-controlled (admin slash command) and
+// the operator may legitimately want to:
+//
+//   - Run a race mid-stream while the queue is still open
+//   - Re-run a race after a winner was declared
+//   - Run multiple ad-hoc races on the same session
+//
+// Each race overwrites duck_race_winner_user_id with the latest result;
+// the queue's open/closed status is independent and operator-controlled
+// via /offline + /queue close. These tests pin the new permissive
+// behavior so a future refactor doesn't quietly re-introduce the gate.
 // =========================================================================
 
-describe('duck race double-start prevention', () => {
-    it('only one race can claim a queue', () => {
+describe('duck race claim is permissive', () => {
+    it('claim succeeds on a fresh open queue', () => {
         stmts.queues.createQueue.run();
-        stmts.queues.addEntry.run(1, 'user_A', 'a@test.com', 'Product', 1, 'session_1');
-        stmts.queues.addEntry.run(1, 'user_B', 'b@test.com', 'Product', 1, 'session_2');
-
-        // Two races try to claim simultaneously
-        const claim1 = stmts.queues.claimForRace.run(1);
-        const claim2 = stmts.queues.claimForRace.run(1);
-
-        expect(claim1.changes).toBe(1); // first claim wins
-        expect(claim2.changes).toBe(0); // second claim fails
-
-        const queue = stmts.queues.getQueueById.get(1);
-        expect(queue.status).toBe('racing');
-    });
-
-    it('cannot claim a queue already being raced', () => {
-        stmts.queues.createQueue.run();
-        stmts.queues.claimForRace.run(1);
-
         const result = stmts.queues.claimForRace.run(1);
-        expect(result.changes).toBe(0);
+        expect(result.changes).toBe(1);
     });
 
-    it('cannot claim a completed queue', () => {
+    it('claim succeeds on a queue with a winner already declared (re-run case)', () => {
         stmts.queues.createQueue.run();
         stmts.queues.setDuckRaceWinner.run('winner_1', 1);
 
+        // Re-run is allowed — operator may want a second race for fun
+        // or to redo a contested first pick.
         const result = stmts.queues.claimForRace.run(1);
-        expect(result.changes).toBe(0);
+        expect(result.changes).toBe(1);
+    });
+
+    it('claim succeeds on a closed queue (post-/offline)', () => {
+        stmts.queues.createQueue.run();
+        stmts.queues.closeQueue.run(1);
+
+        const result = stmts.queues.claimForRace.run(1);
+        expect(result.changes).toBe(1);
     });
 });
 

@@ -111,7 +111,11 @@ describe('queue entries', () => {
 });
 
 describe('duck race winner', () => {
-    it('sets duck race winner', () => {
+    it('sets duck race winner WITHOUT changing queue status', () => {
+        // Race is decoupled from queue lifecycle — winner is just a
+        // column on the session. Status stays whatever it was (open
+        // mid-stream, closed after /offline) so the operator can run
+        // multiple ad-hoc races on the same session if they want.
         stmts.queues.createQueue.run();
         const queue = stmts.queues.getActiveQueue.get();
 
@@ -120,7 +124,27 @@ describe('duck race winner', () => {
 
         const updated = stmts.queues.getQueueById.get(queue.id);
         expect(updated.duck_race_winner_id).toBe('user1');
-        expect(updated.status).toBe('complete');
+        expect(updated.status).toBe('open');
+    });
+
+    it('allows re-running the race — second winner overwrites the first', () => {
+        // The operator may run the race multiple times on the same
+        // queue session (testing, special moments, redo if first
+        // pick was contested). Each setDuckRaceWinner call replaces
+        // the previous winner; the queue stays in whatever lifecycle
+        // state it was already in.
+        stmts.queues.createQueue.run();
+        const queue = stmts.queues.getActiveQueue.get();
+
+        stmts.queues.addEntry.run(queue.id, 'user1', 'u1@test.com', 'Pack', 1, 's1');
+        stmts.queues.addEntry.run(queue.id, 'user2', 'u2@test.com', 'Pack', 1, 's2');
+
+        stmts.queues.setDuckRaceWinner.run('user1', queue.id);
+        stmts.queues.setDuckRaceWinner.run('user2', queue.id);
+
+        const updated = stmts.queues.getQueueById.get(queue.id);
+        expect(updated.duck_race_winner_id).toBe('user2');
+        expect(updated.status).toBe('open');
     });
 });
 

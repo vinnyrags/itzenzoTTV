@@ -323,7 +323,12 @@ describe('full card night critical path', () => {
             ]),
         }));
 
-        // ── Step 7: Declare duck race winner (closes queue, opens next) ──
+        // ── Step 7: Declare duck race winner ────────────────────────
+        // Race is now decoupled from queue lifecycle — declaring a
+        // winner does NOT close the queue or auto-open a new one.
+        // The operator can run multiple ad-hoc races on the same
+        // session, each overwriting duck_race_winner_id with the
+        // latest winner. /offline (Step 8) handles queue close.
         vi.clearAllMocks();
 
         const winnerMsg = adminMsg({ content: '!duckrace winner @alice' });
@@ -331,15 +336,15 @@ describe('full card night critical path', () => {
         winnerMsg.mentions.users.first = vi.fn().mockReturnValue(aliceMention);
         await handleDuckRace(winnerMsg, ['winner', '@alice']);
 
-        // Queue marked complete with winner and closed
-        const completedQueue = stmts.queues.getQueueById.get(queue.id);
-        expect(completedQueue.status).toBe('complete');
-        expect(completedQueue.duck_race_winner_id).toBe('alice_discord');
+        // Winner is set, but status is NOT auto-flipped to 'complete'
+        const racedQueue = stmts.queues.getQueueById.get(queue.id);
+        expect(racedQueue.duck_race_winner_id).toBe('alice_discord');
+        expect(racedQueue.status).toBe('open');
 
-        // New queue opened for next stream's pre-orders
-        const newQueue = stmts.queues.getActiveQueue.get();
-        expect(newQueue).toBeTruthy();
-        expect(newQueue.id).not.toBe(queue.id);
+        // No new queue auto-opened — same session is still active
+        const sessionStillActive = stmts.queues.getActiveQueue.get();
+        expect(sessionStillActive).toBeTruthy();
+        expect(sessionStillActive.id).toBe(queue.id);
 
         // Winner announced in channel + announcements
         expect(winnerMsg.channel.send).toHaveBeenCalled();
@@ -356,8 +361,14 @@ describe('full card night critical path', () => {
         // Session ended
         expect(stmts.livestream.getActiveSession.get()).toBeUndefined();
 
-        // Queue is still open (offline doesn't close it — duck race already did)
-        expect(stmts.queues.getActiveQueue.get()).toBeTruthy();
+        // After /offline runs, the queue from this stream gets closed
+        // by handleOffline's own close logic (when the queue has
+        // entries it gets closed and a fresh one opened). Active
+        // queue is now a NEW session ready for the next stream's
+        // pre-orders.
+        const offlineQueue = stmts.queues.getActiveQueue.get();
+        expect(offlineQueue).toBeTruthy();
+        expect(offlineQueue.id).not.toBe(queue.id);
 
         // Stream-ended announcement
         expect(mockSendEmbed).toHaveBeenCalledWith('ANNOUNCEMENTS', expect.objectContaining({

@@ -276,8 +276,14 @@ async function handleDuckRace(message, args) {
 async function findRaceableQueue() {
     const active = await queueSource.getActiveQueue();
     if (active) return active;
+    // No active session — fall back to the most recent queue. Previously
+    // this filtered out queues with a winner already declared (one race
+    // per queue), but the race is now operator-controlled and can be
+    // re-run ad hoc — each race overwrites the previous winner. The
+    // dedicated #duck-race channel + the homepage column both update
+    // reactively when the new winner is set.
     const recent = await queueSource.getRecentQueues(1);
-    return recent.length && !recent[0].duck_race_winner_id ? recent[0] : null;
+    return recent.length ? recent[0] : null;
 }
 
 async function showDuckRace(message) {
@@ -347,13 +353,14 @@ async function runAnimatedRace(message, pickedWinnerId) {
     // Atomically claim the queue for racing — prevents double-start
     const claimed = await queueSource.claimForRace(queue.id);
     if (claimed.changes === 0) {
-        return message.reply('A duck race is already in progress!');
+        return message.reply('No session found to run a duck race for.');
     }
 
     const uniqueBuyers = await queueSource.getUniqueBuyers(queue.id);
     if (uniqueBuyers.length < 2) {
-        // Release the claim — revert to closed
-        await queueSource.closeQueue(queue.id);
+        // No queue-lifecycle rollback needed — the race no longer
+        // toggles session status, so aborting just means: don't run
+        // the animation and don't set a winner.
         return message.reply('Need at least 2 ducks for a race!');
     }
 
@@ -361,7 +368,6 @@ async function runAnimatedRace(message, pickedWinnerId) {
     if (pickedWinnerId) {
         const inRoster = uniqueBuyers.some((b) => b.buyer === pickedWinnerId);
         if (!inRoster) {
-            await queueSource.closeQueue(queue.id);
             return message.channel.send(`<@${pickedWinnerId}> is not in the duck race roster.`);
         }
         const raceChannelId = config.CHANNELS.DUCK_RACE || config.CHANNELS.QUEUE;
@@ -373,8 +379,11 @@ async function runAnimatedRace(message, pickedWinnerId) {
         || uniqueBuyers[Math.floor(Math.random() * uniqueBuyers.length)].buyer;
 
     try {
-        // Generate race frames
-        const frames = generateRaceFrames(uniqueBuyers, winnerId, 5);
+        // 12 frames × 2500 ms delay each = 30 seconds of animation,
+        // the default duration that's documented operator-facing.
+        // Race length is intentionally not parameterized — keeps the
+        // dramatic beat consistent across streams.
+        const frames = generateRaceFrames(uniqueBuyers, winnerId, 12);
 
         // Post the animated race in #duck-race (was #queue). The
         // persistent roster embed in #duck-race keeps showing the
@@ -384,7 +393,6 @@ async function runAnimatedRace(message, pickedWinnerId) {
         // DUCK_RACE channel isn't configured (env-driven optional).
         const raceChannel = getChannel('DUCK_RACE') || getChannel('QUEUE');
         if (!raceChannel) {
-            await queueSource.closeQueue(queue.id);
             return message.reply('Cannot find #duck-race or #queue channel.');
         }
 
@@ -405,11 +413,11 @@ async function runAnimatedRace(message, pickedWinnerId) {
             await raceMsg.edit({ embeds: [embed] });
         }
 
-        // Finalize — assign role, announcements, open next queue
+        // Finalize — set winner, assign role, announce. Race no longer
+        // toggles queue lifecycle (open/close), so a failure here is
+        // surfaced via the throw but doesn't roll back any queue state.
         await finalizeDuckRace(queue.id, winnerId, uniqueBuyers.length, message);
     } catch (e) {
-        // On error, revert queue status so it can be retried
-        await queueSource.closeQueue(queue.id);
         throw e;
     }
 }
@@ -520,12 +528,11 @@ async function finalizeDuckRace(queueId, winnerId, entryCount, message) {
     // without switching tabs to the dedicated Duck Race column.
     broadcastDuckRaceWinner(winnerLabel, entryCount);
 
-    // Open next queue for pre-orders
-    const newQueueResult = await queueSource.createQueue();
-    const newQueue = newQueueResult.session ?? (await queueSource.getQueueById(newQueueResult.lastInsertRowid));
-    await postQueueChannelEmbed(newQueue);
-
-    await message.channel.send(`\uD83D\uDCCB Queue #${queueId} closed. Queue #${newQueue.id} opened for next stream.`);
+    // Race is no longer coupled to queue lifecycle \u2014 the queue stays
+    // in its current state (open or closed). Running another race on
+    // the same session is supported; each one overwrites the previous
+    // winner. Use `/offline` or `/queue close` separately to manage
+    // queue lifecycle.
 }
 
 // -------------------------------------------------------------------------
@@ -550,11 +557,9 @@ async function declareDuckRaceWinner(message, args) {
         return message.reply(`<@${mentioned.id}> is not in the duck race roster for Queue #${queue.id}.`);
     }
 
-    // Close the queue first if still open
-    if (queue.status === 'open') {
-        await queueSource.closeQueue(queue.id);
-    }
-
+    // Race is decoupled from queue lifecycle — don't auto-close the
+    // queue here. The operator manages queue open/closed via
+    // /offline and /queue close independently of duck race winners.
     await finalizeDuckRace(queue.id, mentioned.id, uniqueBuyers.length, message);
 }
 
