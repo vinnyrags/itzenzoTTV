@@ -363,7 +363,8 @@ async function runAnimatedRace(message, pickedWinnerId) {
             await queueSource.closeQueue(queue.id);
             return message.channel.send(`<@${pickedWinnerId}> is not in the duck race roster.`);
         }
-        await message.channel.send(`🦆 Duck race picked. Starting race in <#${config.CHANNELS.QUEUE}>...`);
+        const raceChannelId = config.CHANNELS.DUCK_RACE || config.CHANNELS.QUEUE;
+        await message.channel.send(`🦆 Duck race picked. Starting race in <#${raceChannelId}>...`);
     }
 
     // Determine winner
@@ -374,11 +375,16 @@ async function runAnimatedRace(message, pickedWinnerId) {
         // Generate race frames
         const frames = generateRaceFrames(uniqueBuyers, winnerId, 5);
 
-        // Post initial "starting" embed to #queue
-        const queueChannel = getChannel('QUEUE');
-        if (!queueChannel) {
+        // Post the animated race in #duck-race (was #queue). The
+        // persistent roster embed in #duck-race keeps showing the
+        // pre-race state during the animation; the race message is a
+        // separate ephemeral series of edits showing each frame, then
+        // settling on the final winner state. Falls back to #queue if
+        // DUCK_RACE channel isn't configured (env-driven optional).
+        const raceChannel = getChannel('DUCK_RACE') || getChannel('QUEUE');
+        if (!raceChannel) {
             await queueSource.closeQueue(queue.id);
-            return message.reply('Cannot find #queue channel.');
+            return message.reply('Cannot find #duck-race or #queue channel.');
         }
 
         const startEmbed = new EmbedBuilder()
@@ -386,7 +392,7 @@ async function runAnimatedRace(message, pickedWinnerId) {
             .setDescription('**Race starting...**\n\nDucks are lining up!')
             .setColor(0xceff00);
 
-        const raceMsg = await queueChannel.send({ embeds: [startEmbed] });
+        const raceMsg = await raceChannel.send({ embeds: [startEmbed] });
 
         // Animate frames with delays
         const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -640,25 +646,17 @@ function buildQueueDescription(entries, uniqueBuyers) {
         return `${i + 1}. ${label} — ${product}`;
     });
 
-    const roster = uniqueBuyers.map((b, i) => {
-        // The WP-side `uniqueBuyers` repository method now returns the
-        // best display key per buyer (discord_user_id → discord_handle →
-        // customer_email). Render the three shapes:
-        //   - all digits      → Discord user ID, ping with <@id>
-        //   - contains an '@' → email address, render as-is
-        //   - otherwise       → Discord handle, prefix with @
-        let label;
-        if (/^\d+$/.test(b.buyer)) {
-            label = `<@${b.buyer}>`;
-        } else if (b.buyer.includes('@')) {
-            label = b.buyer;
-        } else {
-            label = `@${b.buyer}`;
-        }
-        return `${i + 1}. ${label}`;
-    }).join('\n');
+    // The full duck race roster used to render here as a footer block.
+    // Now lives in the dedicated #duck-race channel's persistent embed
+    // (lib/duck-race-embed.js). Replaced with a one-line pointer so
+    // operators / viewers landing in #queue mid-stream still see the
+    // count + a CTA to the full roster.
+    const duckRaceChannelId = config.CHANNELS.DUCK_RACE;
+    const duckRacePointer = duckRaceChannelId
+        ? `\n\n🦆 ${uniqueBuyers.length} duck race entr${uniqueBuyers.length === 1 ? 'y' : 'ies'} — see <#${duckRaceChannelId}>`
+        : `\n\n🦆 ${uniqueBuyers.length} duck race entr${uniqueBuyers.length === 1 ? 'y' : 'ies'}`;
 
-    return lines.join('\n') + `\n\n🦆 **Duck race roster (${uniqueBuyers.length}):**\n${roster}`;
+    return lines.join('\n') + duckRacePointer;
 }
 
 function buildQueueEmbed(queue, entries, uniqueBuyers, status) {

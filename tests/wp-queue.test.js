@@ -32,6 +32,7 @@ describe('adaptSession', () => {
             id: 7,
             status: 'open',
             channelMessageId: '123',
+            duckRaceChannelMessageId: '456',
             duckRaceWinnerUserId: '99887766',
             createdAt: '2026-04-27T14:21:03Z',
             closedAt: null,
@@ -41,10 +42,29 @@ describe('adaptSession', () => {
             id: 7,
             status: 'open',
             channel_message_id: '123',
+            duck_race_channel_message_id: '456',
             duck_race_winner_id: '99887766',
             created_at: '2026-04-27 14:21:03',
             closed_at: null,
         });
+    });
+
+    it('defaults duck_race_channel_message_id to null when WP omits it', () => {
+        // The field is null for sessions that pre-date the v4 schema OR
+        // when the bot has never posted a #duck-race embed for this
+        // session yet. updateDuckRaceEmbed treats null as "post fresh
+        // and persist the new message id" — the SAME branch as the
+        // "tried to fetch existing but it's been deleted" case.
+        const wp = {
+            id: 8,
+            status: 'open',
+            channelMessageId: null,
+            duckRaceWinnerUserId: null,
+            createdAt: '2026-04-27T14:21:03Z',
+            closedAt: null,
+        };
+        const adapted = wpQueue.__internal.adaptSession(wp);
+        expect(adapted.duck_race_channel_message_id).toBeNull();
     });
 
     it('returns null for null input', () => {

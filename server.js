@@ -48,6 +48,7 @@ function applyTosMetadata(params, discordUserId) {
 }
 import { addClient, broadcast as broadcastQueue, clientCount } from './lib/queue-broadcaster.js';
 import { updateQueueChannelEmbed } from './commands/queue.js';
+import { updateDuckRaceEmbed } from './lib/duck-race-embed.js';
 import { client as discordClient } from './discord.js';
 
 const webhookLimit = createLimiter(10);
@@ -323,6 +324,8 @@ app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res)
         let sessionId = null;
         if (event.startsWith('entry.') && dataObj.rawEntry && dataObj.rawEntry.sessionId) {
             sessionId = Number(dataObj.rawEntry.sessionId);
+        } else if (event === 'roster.updated' && dataObj.sessionId) {
+            sessionId = Number(dataObj.sessionId);
         } else if (event.startsWith('session.') && dataObj.session && dataObj.session.id) {
             sessionId = Number(dataObj.session.id);
         }
@@ -332,6 +335,14 @@ app.post('/webhooks/queue-changed', express.json({ limit: '256kb' }), (req, res)
             // will retry the refresh anyway.
             updateQueueChannelEmbed(sessionId).catch((e) => {
                 console.error(`queue-changed embed refresh failed for session ${sessionId}:`, e.message);
+            });
+            // Same fire-and-forget for the #duck-race embed. roster.updated
+            // events fire it; entry.* and session.* events also fire it
+            // (status flips, winner declarations, etc.). updateDuckRaceEmbed
+            // silently noops when CHANNELS.DUCK_RACE is unset, so dev
+            // environments without the channel configured don't break.
+            updateDuckRaceEmbed(sessionId).catch((e) => {
+                console.error(`queue-changed duck-race embed refresh failed for session ${sessionId}:`, e.message);
             });
         }
 
